@@ -135,8 +135,10 @@ public class UserController {
         requireAdmin();
         SysUser user = requireUser(id);
         preventSelfChange(user);
-        user.setDeleted(true);
+        // 删除用户时同时置为已禁用，保留可审计状态
+        user.setStatus("DISABLED");
         userMapper.updateById(user);
+        userMapper.deleteById(id);
         userMapper.deleteUserRoles(id);
         return R.ok();
     }
