@@ -59,6 +59,16 @@ export function deleteKnowledgeBase(id: string) {
   return request.delete<ApiResult<null>>(`/knowledge-bases/${id}`)
 }
 
+export interface ReindexResult {
+  knowledgeBaseId: string
+  reindexed: number
+}
+
+/** 重建知识库索引 POST /search/reindex/{id} */
+export function reindexKnowledgeBase(id: string) {
+  return request.post<ApiResult<ReindexResult>>(`/search/reindex/${id}`)
+}
+
 /** 查询知识库授权列表 */
 export function listKbPermissions(id: string) {
   return request.get<ApiResult<KbPermissionItem[]>>(`/knowledge-bases/${id}/permissions`)

@@ -21,6 +21,7 @@ from ..common import (
     new_element_id,
 )
 from ..common.file_utils import detect_file_type, validate_file
+from ..common.ocr_client import recognize_image
 
 
 class VLMClient(ABC):
@@ -115,56 +116,84 @@ class ImageParser(DocumentParser):
         if not ok:
             raise ParserError(f"文件校验失败: {reason}")
 
-        try:
-            import pytesseract
-            from PIL import Image
-        except ImportError as exc:  # pragma: no cover
-            raise ParserError(
-                "解析图片需要 pytesseract 与 pillow，"
-                "请先执行: pip install pytesseract pillow 并安装 Tesseract 引擎"
-            ) from exc
+        from PIL import Image
 
         try:
             with Image.open(file_path) as image:
                 width, height = image.size
-                data = pytesseract.image_to_data(
-                    image, lang=os.environ.get("OCR_LANG", "chi_sim+eng"),
-                    output_type=pytesseract.Output.DICT,
-                )
         except Exception as exc:
-            raise ParserError(f"OCR 识别失败: {exc}") from exc
+            raise ParserError(f"无法打开图片: {exc}") from exc
 
         words: List[Dict[str, Any]] = []
-        line_texts: Dict[int, List[str]] = {}
-        for i, text in enumerate(data.get("text", [])):
-            text = str(text).strip()
-            if not text:
-                continue
+        content = ""
+        engine = "tesseract"
+
+        ocr_result = recognize_image(file_path)
+        if ocr_result and not ocr_result.get("placeholder") and str(ocr_result.get("text", "")).strip():
+            content = str(ocr_result["text"]).strip()
+            engine = str(ocr_result.get("backend") or ocr_result.get("engine") or "ocr-service")
+            for item in ocr_result.get("words", []):
+                bbox = item.get("bbox") or [0, 0, 0, 0]
+                words.append({
+                    "text": item.get("text", ""),
+                    "confidence": float(item.get("confidence", 0.0)),
+                    "bbox": bbox,
+                    "block": 0,
+                    "paragraph": 0,
+                    "line": 0,
+                })
+
+        if not content:
             try:
-                confidence = float(data["conf"][i])
-            except (ValueError, TypeError, IndexError):
-                confidence = 0.0
-            left = int(data["left"][i]); top = int(data["top"][i])
-            width_w = int(data["width"][i]); height_w = int(data["height"][i])
-            block_num = int(data.get("block_num", [0] * len(data["text"]))[i])
-            par_num = int(data.get("par_num", [0] * len(data["text"]))[i])
-            line_num = int(data.get("line_num", [0] * len(data["text"]))[i])
-            words.append({
-                "text": text,
-                "confidence": confidence,
-                "bbox": [left, top, left + width_w, top + height_w],
-                "block": block_num,
-                "paragraph": par_num,
-                "line": line_num,
-            })
-            line_texts.setdefault(line_num, []).append(text)
+                import pytesseract
+            except ImportError as exc:  # pragma: no cover
+                raise ParserError(
+                    "OCR 服务不可用且未安装 pytesseract；"
+                    "请配置 OCR_SERVICE_URL 或安装 pytesseract pillow"
+                ) from exc
+            try:
+                with Image.open(file_path) as image:
+                    data = pytesseract.image_to_data(
+                        image, lang=os.environ.get("OCR_LANG", "chi_sim+eng"),
+                        output_type=pytesseract.Output.DICT,
+                    )
+            except Exception as exc:
+                raise ParserError(f"OCR 识别失败: {exc}") from exc
+
+            line_texts: Dict[int, List[str]] = {}
+            for i, text in enumerate(data.get("text", [])):
+                text = str(text).strip()
+                if not text:
+                    continue
+                try:
+                    confidence = float(data["conf"][i])
+                except (ValueError, TypeError, IndexError):
+                    confidence = 0.0
+                left = int(data["left"][i]); top = int(data["top"][i])
+                width_w = int(data["width"][i]); height_w = int(data["height"][i])
+                block_num = int(data.get("block_num", [0] * len(data["text"]))[i])
+                par_num = int(data.get("par_num", [0] * len(data["text"]))[i])
+                line_num = int(data.get("line_num", [0] * len(data["text"]))[i])
+                words.append({
+                    "text": text,
+                    "confidence": confidence,
+                    "bbox": [left, top, left + width_w, top + height_w],
+                    "block": block_num,
+                    "paragraph": par_num,
+                    "line": line_num,
+                })
+                line_texts.setdefault(line_num, []).append(text)
+            content = "\n".join(" ".join(v) for _, v in sorted(line_texts.items()))
 
         elements: List[Element] = []
-        if words:
-            content = "\n".join(" ".join(v) for _, v in sorted(line_texts.items()))
+        if content:
             element = self.text_element(
                 new_element_id(1), content,
-                metadata={"words": words, "confidence": self._avg_confidence(words)},
+                metadata={
+                    "words": words,
+                    "confidence": self._avg_confidence(words),
+                    "ocr_engine": engine,
+                },
             )
             element.bounding_box = BoundingBox(
                 x0=0, y0=0, x1=width, y1=height, page=1,
@@ -192,6 +221,7 @@ class ImageParser(DocumentParser):
                 "image_width": width,
                 "image_height": height,
                 "word_count": len(words),
+                "ocr_engine": engine,
                 "vlm_description": description,
             },
         ).to_dict()

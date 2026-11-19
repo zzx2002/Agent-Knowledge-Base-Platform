@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import os
 import re
 import statistics
+import tempfile
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from ..common import (
@@ -19,6 +22,7 @@ from ..common import (
     new_element_id,
 )
 from ..common.file_utils import validate_file
+from ..common.ocr_client import recognize_image
 
 _HEADING_PATTERNS = (
     re.compile(r"^\s*第[一二三四五六七八九十百\d]+[章节篇部]\s"),
@@ -73,13 +77,36 @@ class PdfParser(DocumentParser):
                     text = page.extract_text() or ""
                     if not text.strip():
                         index += 1
+                        ocr_text = ""
+                        ocr_engine = ""
+                        try:
+                            with tempfile.TemporaryDirectory(prefix="kb_pdf_ocr_") as tmp_dir:
+                                image_path = str(Path(tmp_dir) / f"page_{page_number}.png")
+                                page.to_image(resolution=200).original.save(image_path)
+                                result = recognize_image(image_path)
+                                if result and not result.get("placeholder"):
+                                    ocr_text = str(result.get("text", "")).strip()
+                                    ocr_engine = str(
+                                        result.get("backend")
+                                        or result.get("engine")
+                                        or "ocr-service"
+                                    )
+                        except Exception:
+                            ocr_text = ""
+                        content = ocr_text or (
+                            "[占位] 本页未提取到文本，OCR 服务未返回识别结果。"
+                        )
                         elements.append(
                             self.text_element(
                                 new_element_id(index),
-                                "[占位] 本页未提取到文本，疑似扫描件，可调用 OCR 服务补充。",
+                                content,
                                 page=page_number,
                                 heading_path=heading_path,
-                                metadata={"scan_page": True},
+                                metadata={
+                                    "scan_page": True,
+                                    "ocr_engine": ocr_engine,
+                                    "placeholder": not bool(ocr_text),
+                                },
                             )
                         )
                         continue

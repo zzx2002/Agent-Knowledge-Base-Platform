@@ -8,6 +8,7 @@ XLSX 使用 openpyxl 流式读取（read_only），CSV 使用标准库 csv 并�
 from __future__ import annotations
 
 import csv
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -43,10 +44,18 @@ class ExcelParser(DocumentParser):
 
         file_type = detect_file_type(file_path)
         if file_type == "XLS":
-            raise ParserError(
-                "旧版 .xls 需先用 LibreOffice 转为 .xlsx 后解析，"
-                "可使用 parser.office.libreoffice_adapter.LibreOfficeConverter"
-            )
+            from .libreoffice_adapter import LibreOfficeConverter
+
+            converter = LibreOfficeConverter()
+            with tempfile.TemporaryDirectory(prefix="kb_xls_convert_") as tmp_dir:
+                converted_path = converter.convert(file_path, tmp_dir, "xlsx")
+                parsed = self.parse(converted_path)
+                parsed["file_name"] = Path(file_path).name
+                parsed["file_type"] = "XLS"
+                metadata = parsed.setdefault("metadata", {})
+                metadata["converter"] = "LibreOffice"
+                metadata["converted_ext"] = "xlsx"
+                return parsed
 
         try:
             from openpyxl import load_workbook

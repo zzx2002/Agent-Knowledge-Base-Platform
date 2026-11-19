@@ -2,6 +2,7 @@ package com.agentkb.search.service;
 
 import com.agentkb.document.entity.Document;
 import com.agentkb.document.mapper.DocumentMapper;
+import com.agentkb.search.config.IndexNameResolver;
 import com.agentkb.search.config.SearchProperties;
 import com.agentkb.search.dto.SearchHitDTO;
 import com.agentkb.search.dto.SearchRequest;
@@ -34,15 +35,18 @@ public class SearchService {
     private static final int RRF_CONSTANT = 60;
 
     private final SearchProperties properties;
+    private final IndexNameResolver indexNames;
     private final RestTemplate restTemplate;
     private final KbAccessService accessService;
     private final DocumentMapper documentMapper;
 
     public SearchService(SearchProperties properties,
+                         IndexNameResolver indexNames,
                          @Qualifier("searchRestTemplate") RestTemplate restTemplate,
                          KbAccessService accessService,
                          DocumentMapper documentMapper) {
         this.properties = properties;
+        this.indexNames = indexNames;
         this.restTemplate = restTemplate;
         this.accessService = accessService;
         this.documentMapper = documentMapper;
@@ -118,7 +122,7 @@ public class SearchService {
         body.put("size", size);
 
         String url = properties.getEs().getUrl().replaceAll("/$", "")
-                + "/" + properties.getEs().getIndex() + "/_search";
+                + "/" + indexNames.esIndex() + "/_search";
         try {
             ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.POST,
                     new HttpEntity<>(body, esHeaders()), Map.class);
@@ -173,7 +177,7 @@ public class SearchService {
         }
 
         String url = properties.getQdrant().getUrl().replaceAll("/$", "")
-                + "/collections/" + properties.getQdrant().getCollection() + "/points/search";
+                + "/collections/" + indexNames.qdrantCollection() + "/points/search";
         try {
             ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.POST,
                     new HttpEntity<>(body, qdrantHeaders()), Map.class);

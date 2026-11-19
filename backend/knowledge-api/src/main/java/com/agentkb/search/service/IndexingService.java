@@ -2,6 +2,7 @@ package com.agentkb.search.service;
 
 import com.agentkb.document.entity.DocumentChunk;
 import com.agentkb.document.mapper.DocumentChunkMapper;
+import com.agentkb.search.config.IndexNameResolver;
 import com.agentkb.search.config.SearchProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -33,15 +34,18 @@ public class IndexingService {
     private static final Logger log = LoggerFactory.getLogger(IndexingService.class);
 
     private final SearchProperties properties;
+    private final IndexNameResolver indexNames;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final DocumentChunkMapper chunkMapper;
 
     public IndexingService(SearchProperties properties,
+                           IndexNameResolver indexNames,
                            @Qualifier("searchRestTemplate") RestTemplate restTemplate,
                            ObjectMapper objectMapper,
                            DocumentChunkMapper chunkMapper) {
         this.properties = properties;
+        this.indexNames = indexNames;
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
         this.chunkMapper = chunkMapper;
@@ -141,7 +145,7 @@ public class IndexingService {
 
     private void ensureEsIndex() {
         String url = properties.getEs().getUrl().replaceAll("/$", "")
-                + "/" + properties.getEs().getIndex();
+                + "/" + indexNames.esIndex();
         HttpHeaders headers = esHeaders();
         try {
             restTemplate.exchange(url, HttpMethod.HEAD, new HttpEntity<>(headers), Void.class);
@@ -161,14 +165,14 @@ public class IndexingService {
         propertiesMap.put("properties", fields);
         settings.put("mappings", propertiesMap);
         restTemplate.exchange(url, HttpMethod.PUT, new HttpEntity<>(settings, headers), Map.class);
-        log.info("已创建 ES 索引: {}", properties.getEs().getIndex());
+        log.info("已创建 ES 索引: {}", indexNames.esIndex());
     }
 
     private void indexToEs(List<DocumentChunk> chunks) throws Exception {
         StringBuilder ndjson = new StringBuilder();
         for (DocumentChunk chunk : chunks) {
             ndjson.append(objectMapper.writeValueAsString(Map.of(
-                    "index", Map.of("_index", properties.getEs().getIndex(), "_id", String.valueOf(chunk.getId())))))
+                    "index", Map.of("_index", indexNames.esIndex(), "_id", String.valueOf(chunk.getId())))))
                     .append('\n');
             Map<String, Object> doc = new LinkedHashMap<>();
             doc.put("chunkId", String.valueOf(chunk.getId()));
@@ -194,7 +198,7 @@ public class IndexingService {
 
     private void ensureQdrantCollection() {
         String url = properties.getQdrant().getUrl().replaceAll("/$", "")
-                + "/collections/" + properties.getQdrant().getCollection();
+                + "/collections/" + indexNames.qdrantCollection();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("vectors", Map.of(
                 "size", properties.getQdrant().getDimension(),
@@ -226,7 +230,7 @@ public class IndexingService {
         }
         Map<String, Object> body = Map.of("points", points);
         String url = properties.getQdrant().getUrl().replaceAll("/$", "")
-                + "/collections/" + properties.getQdrant().getCollection() + "/points?wait=true";
+                + "/collections/" + indexNames.qdrantCollection() + "/points?wait=true";
         restTemplate.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, qdrantHeaders()), Map.class);
     }
 

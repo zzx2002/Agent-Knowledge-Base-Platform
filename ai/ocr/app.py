@@ -150,7 +150,7 @@ class OpenAIVisionOCRBackend(OCRBackend):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "请识别并输出图片中的全部文字，保持原始排版。"},
+                        {"type": "text", "text": "逐字识别并输出图片中的全部文字。严禁纠错、补全、重复或添加任何字符，只输出识别到的原文。"},
                         {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
                     ],
                 }

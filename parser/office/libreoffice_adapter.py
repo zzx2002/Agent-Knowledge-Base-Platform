@@ -19,7 +19,14 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from ..common import DocumentParser, Element, ParserError, new_element_id
+from ..common import (
+    BoundingBox,
+    DocumentParser,
+    Element,
+    ParserError,
+    TableData,
+    new_element_id,
+)
 from ..common.file_utils import detect_file_type, validate_file
 
 _CONVERT_MAP = {"DOC": "docx", "PPT": "pptx", "PPTX": "pptx"}
@@ -87,6 +94,9 @@ class _ConvertedParserBase(DocumentParser):
     def supports(self, file_type: str) -> bool:
         return file_type.upper() == self.source_type
 
+    def target_parser(self) -> DocumentParser:
+        raise NotImplementedError
+
     def parse(self, file_path: str) -> dict:
         ok, reason = validate_file(file_path)
         if not ok:
@@ -97,25 +107,14 @@ class _ConvertedParserBase(DocumentParser):
         converter = LibreOfficeConverter()
         with tempfile.TemporaryDirectory(prefix="kb_convert_") as tmp_dir:
             converted_path = converter.convert(file_path, tmp_dir, self.target_ext)
-            element = Element(
-                element_id=new_element_id(1),
-                type="text",
-                content=(
-                    f"[占位] {self.source_type} 已通过 LibreOffice 转换为 "
-                    f"{self.target_ext.upper()}，完整解析待接入 Docling / python-pptx。"
-                ),
-                metadata={
-                    "placeholder": True,
-                    "converted_file_name": Path(converted_path).name,
-                    "converted_ext": self.target_ext,
-                },
-            )
-            return self.build_document(
-                file_path,
-                self.source_type,
-                [element],
-                metadata={"placeholder": True, "converter": "LibreOffice"},
-            ).to_dict()
+            parsed = self.target_parser().parse(converted_path)
+            parsed["file_name"] = Path(file_path).name
+            parsed["file_type"] = self.source_type
+            metadata = parsed.setdefault("metadata", {})
+            metadata["converter"] = "LibreOffice"
+            metadata["converted_ext"] = self.target_ext
+            metadata["placeholder"] = False
+            return parsed
 
 
 class DocParser(_ConvertedParserBase):
@@ -123,37 +122,84 @@ class DocParser(_ConvertedParserBase):
     source_type = "DOC"
     target_ext = "docx"
 
+    def target_parser(self) -> DocumentParser:
+        from .docx_parser import DocxParser
+
+        return DocxParser()
+
 
 class PptParser(_ConvertedParserBase):
     supported_types = ("PPT",)
     source_type = "PPT"
     target_ext = "pptx"
 
+    def target_parser(self) -> DocumentParser:
+        return PptxParser()
 
-class PptxParser(_ConvertedParserBase):
-    """PPTX 占位：架构中走 Docling，这里仅保留转换与扩展位。"""
+
+class PptxParser(DocumentParser):
+    """使用 python-pptx 解析幻灯片文本与表格。"""
 
     supported_types = ("PPTX",)
-    source_type = "PPTX"
-    target_ext = "pdf"
+
+    def supports(self, file_type: str) -> bool:
+        return file_type.upper() in self.supported_types
 
     def parse(self, file_path: str) -> dict:
         ok, reason = validate_file(file_path)
         if not ok:
             raise ParserError(f"文件校验失败: {reason}")
-        converter = LibreOfficeConverter()
-        with tempfile.TemporaryDirectory(prefix="kb_convert_") as tmp_dir:
-            converted_path = converter.convert(file_path, tmp_dir, self.target_ext)
-            element = Element(
-                element_id=new_element_id(1),
-                type="text",
-                content="[占位] PPTX 完整解析待接入 Docling，已生成 PDF 供后续处理。",
-                metadata={
-                    "placeholder": True,
-                    "converted_file_name": Path(converted_path).name,
-                },
-            )
-            return self.build_document(
-                file_path, "PPTX", [element],
-                metadata={"placeholder": True, "converter": "LibreOffice"},
-            ).to_dict()
+        try:
+            from pptx import Presentation
+        except ImportError as exc:  # pragma: no cover
+            raise ParserError(
+                "解析 PPTX 需要 python-pptx，请先执行: pip install python-pptx"
+            ) from exc
+        try:
+            presentation = Presentation(file_path)
+        except Exception as exc:
+            raise ParserError(f"无法打开 PPTX 文件: {exc}") from exc
+
+        elements = []
+        index = 0
+        for slide_no, slide in enumerate(presentation.slides, start=1):
+            for shape in slide.shapes:
+                if getattr(shape, "has_table", False):
+                    rows = [
+                        [cell.text.strip() for cell in row.cells]
+                        for row in shape.table.rows
+                    ]
+                    if not rows:
+                        continue
+                    index += 1
+                    element = self.table_element(
+                        new_element_id(index),
+                        TableData(headers=rows[0], rows=rows[1:]),
+                        page=slide_no,
+                    )
+                    if shape.left is not None and shape.top is not None:
+                        element.bounding_box = BoundingBox(
+                            x0=float(shape.left), y0=float(shape.top),
+                            x1=float(shape.left + shape.width),
+                            y1=float(shape.top + shape.height),
+                            page=slide_no,
+                        )
+                    elements.append(element)
+                    continue
+                if getattr(shape, "has_text_frame", False):
+                    text = shape.text.strip()
+                    if not text:
+                        continue
+                    index += 1
+                    elements.append(
+                        self.text_element(
+                            new_element_id(index), text, page=slide_no,
+                            metadata={"shape_name": shape.name},
+                        )
+                    )
+
+        return self.build_document(
+            file_path, "PPTX", elements,
+            page_count=len(presentation.slides),
+            metadata={"slide_count": len(presentation.slides)},
+        ).to_dict()

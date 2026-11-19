@@ -10,6 +10,7 @@ import {
   listKbPermissions,
   grantKbPermission,
   revokeKbPermission,
+  reindexKnowledgeBase,
   type KnowledgeBase as KB,
   type KbPermissionItem,
 } from '@/api/knowledgeBase'
@@ -46,6 +47,23 @@ const permissionForm = reactive({
   permission: 'READ' as KbPermissionItem['permission'],
 })
 const permissionLoading = ref(false)
+const reindexingId = ref('')
+
+async function reindex(row: KB) {
+  await ElMessageBox.confirm(
+    `确认重建「${row.name}」的全部索引？该操作会重新向量化所有分块。`,
+    '重建索引',
+    { type: 'warning' },
+  )
+  reindexingId.value = row.id
+  try {
+    const res = await reindexKnowledgeBase(row.id)
+    const data = (res as any).data ?? res
+    ElMessage.success(`已重建 ${data?.reindexed ?? 0} 个分块`)
+  } finally {
+    reindexingId.value = ''
+  }
+}
 
 async function openPermissions(row: KB) {
   permissionKb.value = row
@@ -186,10 +204,17 @@ onMounted(loadData)
         <el-table-column prop="owner_id" label="归属用户ID" width="110" />
         <el-table-column prop="document_count" label="文档数" width="100" />
         <el-table-column prop="updated_at" label="更新时间" width="170" />
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
             <el-button link type="warning" :icon="Lock" @click="openPermissions(row)">授权</el-button>
+            <el-button
+              link
+              type="success"
+              :icon="Refresh"
+              :loading="reindexingId === row.id"
+              @click="reindex(row)"
+            >重建索引</el-button>
             <el-button link type="danger" :icon="Delete" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
