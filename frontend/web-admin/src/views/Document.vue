@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { UploadFilled, Search, Refresh, Delete, Download, View } from '@element-plus/icons-vue'
+import { UploadFilled, Search, Refresh, Delete, Download, View, Document } from '@element-plus/icons-vue'
 import type { UploadRawFile } from 'element-plus'
 import {
   uploadDocuments,
@@ -10,6 +10,7 @@ import {
   deleteDocument,
   getDocumentContent,
   getDocumentChunks,
+  fetchDocumentPreview,
   type DocumentItem,
   type DocumentElementItem,
   type DocumentChunkItem,
@@ -31,6 +32,13 @@ const elements = ref<DocumentElementItem[]>([])
 const chunks = ref<DocumentChunkItem[]>([])
 const previewTab = ref('content')
 const chunkTotal = ref(0)
+
+const filePreviewVisible = ref(false)
+const filePreviewTitle = ref('')
+const filePreviewUrl = ref('')
+const filePreviewType = ref('')
+const filePreviewText = ref('')
+const filePreviewLoading = ref(false)
 
 function statusType(status?: string) {
   switch (status) {
@@ -134,9 +142,38 @@ async function loadChunks(id: string) {
   chunkTotal.value = data.total || 0
 }
 
+function releaseFilePreview() {
+  if (filePreviewUrl.value) {
+    URL.revokeObjectURL(filePreviewUrl.value)
+    filePreviewUrl.value = ''
+  }
+  filePreviewText.value = ''
+}
+
+async function openFilePreview(row: DocumentItem) {
+  filePreviewLoading.value = true
+  try {
+    releaseFilePreview()
+    const { blob, url } = await fetchDocumentPreview(row.id)
+    filePreviewUrl.value = url
+    filePreviewType.value = blob.type
+    if (blob.type.startsWith('text/')) {
+      filePreviewText.value = await blob.text()
+    }
+    filePreviewTitle.value = `原文预览 - ${row.file_name}`
+    filePreviewVisible.value = true
+  } catch {
+    // 请求拦截器已提示错误
+  } finally {
+    filePreviewLoading.value = false
+  }
+}
+
 function download(row: DocumentItem) {
   ElMessage.info(`下载地址：/api/v1/documents/${row.id}/download（后端实现后可用）`)
 }
+
+onBeforeUnmount(releaseFilePreview)
 
 onMounted(loadData)
 </script>
@@ -220,8 +257,9 @@ onMounted(loadData)
           <template #default="{ row }">{{ formatSize(row.file_size) }}</template>
         </el-table-column>
         <el-table-column prop="created_at" label="上传时间" width="180" />
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="370" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" :icon="Document" @click="openFilePreview(row)">原文预览</el-button>
             <el-button link type="primary" :icon="View" @click="preview(row)">解析结果</el-button>
             <el-button link :icon="Refresh" @click="reparse(row)">重新解析</el-button>
             <el-button link :icon="Download" @click="download(row)">下载</el-button>
@@ -265,6 +303,32 @@ onMounted(loadData)
           </div>
         </el-tab-pane>
       </el-tabs>
+    </el-dialog>
+
+    <el-dialog
+      v-model="filePreviewVisible"
+      :title="filePreviewTitle"
+      width="1080px"
+      top="4vh"
+      class="file-preview-dialog"
+      destroy-on-close
+      @closed="releaseFilePreview"
+    >
+      <div v-loading="filePreviewLoading" class="file-preview-body">
+        <iframe
+          v-if="filePreviewType.includes('pdf')"
+          :src="filePreviewUrl"
+          class="file-preview-frame"
+          title="文档预览"
+        />
+        <img
+          v-else-if="filePreviewType.startsWith('image/')"
+          :src="filePreviewUrl"
+          class="file-preview-image"
+          alt="文档预览"
+        />
+        <pre v-else class="file-preview-text">{{ filePreviewText }}</pre>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -442,5 +506,34 @@ onMounted(loadData)
   word-break: break-all;
   max-height: 160px;
   overflow: auto;
+}
+.file-preview-body {
+  min-height: 60vh;
+  max-height: 76vh;
+  background: #f5f6fa;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.file-preview-frame {
+  width: 100%;
+  height: 72vh;
+  border: none;
+  display: block;
+}
+.file-preview-image {
+  width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+  display: block;
+}
+.file-preview-text {
+  margin: 0;
+  padding: 20px;
+  height: 72vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 13px;
+  line-height: 1.7;
 }
 </style>

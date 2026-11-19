@@ -37,6 +37,12 @@ export function getDocument(id: string) {
   return request.get<ApiResult<DocumentItem>>(`/documents/${id}`)
 }
 
+/** 原文档预览 GET /documents/{id}/preview（返回 Blob URL，需调用方释放） */
+export async function fetchDocumentPreview(id: string) {
+  const blob = (await request.get(`/documents/${id}/preview`, { responseType: 'blob' })) as unknown as Blob
+  return { blob, url: URL.createObjectURL(blob) }
+}
+
 export interface DocumentElementItem {
   element_id: string
   type: string

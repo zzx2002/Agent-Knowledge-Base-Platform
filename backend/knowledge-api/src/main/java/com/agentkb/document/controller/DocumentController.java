@@ -4,9 +4,14 @@ import com.agentkb.common.BusinessException;
 import com.agentkb.common.PageResult;
 import com.agentkb.common.R;
 import com.agentkb.document.dto.DocumentDTO;
+import com.agentkb.document.dto.DocumentPreviewDTO;
 import com.agentkb.document.service.DocumentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -86,6 +92,18 @@ public class DocumentController {
     @GetMapping("/{id}/content")
     public R<Map<String, Object>> content(@PathVariable Long id) {
         return R.ok(documentService.content(id));
+    }
+
+    @Operation(summary = "原文档在线预览（Office 自动转 PDF）")
+    @GetMapping("/{id}/preview")
+    public ResponseEntity<byte[]> preview(@PathVariable Long id) {
+        DocumentPreviewDTO preview = documentService.preview(id);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(preview.getContentType()));
+        headers.setContentDisposition(ContentDisposition.inline()
+                .filename(preview.getFileName(), StandardCharsets.UTF_8).build());
+        headers.setCacheControl("no-store");
+        return ResponseEntity.ok().headers(headers).body(preview.getData());
     }
 
     @Operation(summary = "删除文档")

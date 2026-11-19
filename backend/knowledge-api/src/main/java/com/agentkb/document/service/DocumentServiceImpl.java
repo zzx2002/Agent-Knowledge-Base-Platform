@@ -4,6 +4,7 @@ import com.agentkb.common.BusinessException;
 import com.agentkb.common.PageResult;
 import com.agentkb.common.mapper.LogicalDeleteMapper;
 import com.agentkb.document.dto.DocumentDTO;
+import com.agentkb.document.dto.DocumentPreviewDTO;
 import com.agentkb.document.entity.Document;
 import com.agentkb.document.entity.DocumentChunk;
 import com.agentkb.document.entity.DocumentElement;
@@ -26,12 +27,21 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 文档上传、列表、详情、删除、重新解析。
@@ -187,6 +197,111 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         result.put("content", fullText.toString());
         result.put("elements", elements.stream().map(this::toElementMap).collect(Collectors.toList()));
         return result;
+    }
+
+    @Override
+    public DocumentPreviewDTO preview(Long id) {
+        Document document = getById(id);
+        if (document == null) {
+            throw BusinessException.notFound("文档不存在");
+        }
+        accessService.require(document.getKbId(), KbAccessService.PERM_READ);
+
+        byte[] bytes;
+        try {
+            bytes = minioStorageService.download(
+                    document.getStorageKey() == null ? document.getStoragePath() : document.getStorageKey());
+        } catch (Exception e) {
+            throw new BusinessException(500, "读取原文件失败: " + e.getMessage());
+        }
+
+        String fileName = document.getFileName() == null ? "document" : document.getFileName();
+        String ext = extension(fileName);
+        if (ext.matches("png|jpg|jpeg|pdf")) {
+            return new DocumentPreviewDTO(bytes, contentType(ext), fileName);
+        }
+        if (ext.matches("txt|md|markdown|csv")) {
+            String text = new String(bytes, StandardCharsets.UTF_8);
+            if (text.contains("\uFFFD")) {
+                text = new String(bytes, java.nio.charset.Charset.forName("GBK"));
+            }
+            return new DocumentPreviewDTO(text.getBytes(StandardCharsets.UTF_8), "text/plain;charset=UTF-8", fileName);
+        }
+        if (Set.of("doc", "docx", "ppt", "pptx", "xls", "xlsx").contains(ext)) {
+            return new DocumentPreviewDTO(convertOfficeToPdf(bytes, fileName), "application/pdf", fileName);
+        }
+        throw BusinessException.badRequest("该格式暂不支持在线预览，请下载后查看");
+    }
+
+    private byte[] convertOfficeToPdf(byte[] bytes, String fileName) {
+        Path tempDir = null;
+        try {
+            tempDir = Files.createTempDirectory("kb-preview-");
+            String safeName = fileName.replace('\\', '_').replace('/', '_');
+            Path source = tempDir.resolve(safeName);
+            Files.write(source, bytes);
+
+            String soffice = System.getenv().getOrDefault("LIBREOFFICE_PATH", "soffice");
+            ProcessBuilder builder = new ProcessBuilder(
+                    soffice, "--headless", "--norestore", "--convert-to", "pdf",
+                    "--outdir", tempDir.toString(), source.toString());
+            Process process = builder.redirectErrorStream(true).start();
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (!process.waitFor(120, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new BusinessException(500, "文档转换超时");
+            }
+            if (process.exitValue() != 0) {
+                throw new BusinessException(500, "文档转换失败: " + output.trim());
+            }
+
+            String base = safeName.contains(".") ? safeName.substring(0, safeName.lastIndexOf('.')) : safeName;
+            Path pdf = tempDir.resolve(base + ".pdf");
+            if (!Files.exists(pdf)) {
+                try (Stream<Path> stream = Files.list(tempDir)) {
+                    pdf = stream.filter(p -> p.toString().toLowerCase(Locale.ROOT).endsWith(".pdf"))
+                            .findFirst().orElse(null);
+                }
+            }
+            if (pdf == null || !Files.exists(pdf)) {
+                throw new BusinessException(500, "文档转换完成但未生成 PDF");
+            }
+            return Files.readAllBytes(pdf);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException(500, "文档转换失败: " + e.getMessage());
+        } finally {
+            if (tempDir != null) {
+                deleteRecursively(tempDir);
+            }
+        }
+    }
+
+    private void deleteRecursively(Path path) {
+        try (Stream<Path> stream = Files.walk(path)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                }
+            });
+        } catch (IOException ignored) {
+        }
+    }
+
+    private String extension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String contentType(String ext) {
+        return switch (ext) {
+            case "pdf" -> "application/pdf";
+            case "png" -> "image/png";
+            case "jpg", "jpeg" -> "image/jpeg";
+            default -> "text/plain;charset=UTF-8";
+        };
     }
 
     @Override
