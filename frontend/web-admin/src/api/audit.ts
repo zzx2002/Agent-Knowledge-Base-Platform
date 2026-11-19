@@ -2,15 +2,15 @@ import request, { type ApiResult, type PageResult } from './request'
 
 export interface AuditLog {
   id: string
-  user_id?: string
+  userId?: string
   username?: string
   operation: string
-  resource_type?: string
-  resource_id?: string
-  request_ip?: string
+  resourceType?: string
+  resourceId?: string
+  requestIp?: string
   success?: boolean
   detail?: Record<string, unknown>
-  created_at?: string
+  createdAt?: string
 }
 
 export interface AuditLogQuery {

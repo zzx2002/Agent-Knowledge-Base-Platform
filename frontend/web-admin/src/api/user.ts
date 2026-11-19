@@ -1,20 +1,20 @@
 import request, { type ApiResult } from './request'
 
 export interface UserInfo {
-  user_id: string
+  userId: string
   username: string
-  display_name: string
+  displayName: string
   email?: string
   phone?: string
-  role_code?: string
-  role_name?: string
+  roleCode?: string
+  roleName?: string
   status?: string
-  created_at?: string
+  createdAt?: string
 }
 
 export interface RoleOption {
-  role_code: string
-  role_name: string
+  roleCode: string
+  roleName: string
 }
 
 export interface CreateUserPayload {

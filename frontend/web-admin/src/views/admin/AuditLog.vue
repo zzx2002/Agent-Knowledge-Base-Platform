@@ -85,13 +85,13 @@ onMounted(loadData)
       </template>
 
       <el-table :data="list" v-loading="loading" border stripe>
-        <el-table-column prop="created_at" label="时间" width="180" />
+        <el-table-column prop="createdAt" label="时间" width="180" />
         <el-table-column prop="username" label="操作人" width="130">
           <template #default="{ row }">{{ row.username || '匿名' }}</template>
         </el-table-column>
         <el-table-column prop="operation" label="操作" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="resource_type" label="资源" width="140" />
-        <el-table-column prop="request_ip" label="来源 IP" width="140" />
+        <el-table-column prop="resourceType" label="资源" width="140" />
+        <el-table-column prop="requestIp" label="来源 IP" width="140" />
         <el-table-column label="结果" width="100">
           <template #default="{ row }">
             <el-tag :type="row.success ? 'success' : 'danger'">
@@ -125,9 +125,9 @@ onMounted(loadData)
       <el-descriptions :column="2" border v-if="current">
         <el-descriptions-item label="操作">{{ current.operation }}</el-descriptions-item>
         <el-descriptions-item label="操作人">{{ current.username || '匿名' }}</el-descriptions-item>
-        <el-descriptions-item label="资源类型">{{ current.resource_type || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="资源 ID">{{ current.resource_id || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="来源 IP">{{ current.request_ip || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="资源类型">{{ current.resourceType || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="资源 ID">{{ current.resourceId || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="来源 IP">{{ current.requestIp || '—' }}</el-descriptions-item>
         <el-descriptions-item label="结果">{{ current.success ? '成功' : '失败' }}</el-descriptions-item>
       </el-descriptions>
       <div class="detail-title">请求明细</div>

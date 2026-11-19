@@ -71,7 +71,7 @@ async function submitCreate() {
 function openEdit(row: UserInfo) {
   editingUser.value = row
   Object.assign(editForm, {
-    roleCode: row.role_code || 'VIEWER',
+    roleCode: row.roleCode || 'VIEWER',
     status: row.status || 'ACTIVE',
     password: '',
   })
@@ -87,7 +87,7 @@ async function submitEdit() {
       status: editForm.status,
     }
     if (editForm.password) payload.password = editForm.password
-    await updateUser(editingUser.value!.user_id, payload)
+    await updateUser(editingUser.value!.userId, payload)
     ElMessage.success('用户信息已更新')
     editVisible.value = false
     await loadData()
@@ -95,8 +95,8 @@ async function submitEdit() {
 }
 
 async function remove(row: UserInfo) {
-  await ElMessageBox.confirm(`确认删除用户「${row.display_name || row.username}」？`, '提示', { type: 'warning' })
-  await deleteUser(row.user_id)
+  await ElMessageBox.confirm(`确认删除用户「${row.displayName || row.username}」？`, '提示', { type: 'warning' })
+  await deleteUser(row.userId)
   ElMessage.success('用户已删除')
   await loadData()
 }
@@ -133,7 +133,7 @@ onMounted(loadData)
       </div>
       <div class="summary-card">
         <span class="summary-label">管理员</span>
-        <strong>{{ users.filter((u) => u.role_code === 'ADMIN').length }}</strong>
+        <strong>{{ users.filter((u) => u.roleCode === 'ADMIN').length }}</strong>
       </div>
       <div class="summary-card">
         <span class="summary-label">角色类型</span>
@@ -153,11 +153,11 @@ onMounted(loadData)
 
       <el-table :data="users" v-loading="loading" border stripe>
         <el-table-column prop="username" label="用户名" min-width="150" />
-        <el-table-column prop="display_name" label="显示名称" min-width="150" />
+        <el-table-column prop="displayName" label="显示名称" min-width="150" />
         <el-table-column prop="email" label="邮箱" min-width="180" />
         <el-table-column label="角色" width="140">
           <template #default="{ row }">
-            <el-tag :type="roleType(row.role_code)">{{ row.role_name || row.role_code || '未分配' }}</el-tag>
+            <el-tag :type="roleType(row.roleCode)">{{ row.roleName || row.roleCode || '未分配' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="110">
@@ -165,7 +165,7 @@ onMounted(loadData)
             <el-tag :type="statusType(row.status)">{{ row.status === 'ACTIVE' ? '已启用' : '已禁用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column prop="createdAt" label="创建时间" width="180" />
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
@@ -191,7 +191,7 @@ onMounted(loadData)
         </el-form-item>
         <el-form-item label="角色" prop="roleCode">
           <el-select v-model="createForm.roleCode" style="width: 100%">
-            <el-option v-for="role in roles" :key="role.role_code" :label="role.role_name" :value="role.role_code" />
+            <el-option v-for="role in roles" :key="role.roleCode" :label="role.roleName" :value="role.roleCode" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -205,7 +205,7 @@ onMounted(loadData)
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="100px">
         <el-form-item label="角色">
           <el-select v-model="editForm.roleCode" style="width: 100%">
-            <el-option v-for="role in roles" :key="role.role_code" :label="role.role_name" :value="role.role_code" />
+            <el-option v-for="role in roles" :key="role.roleCode" :label="role.roleName" :value="role.roleCode" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
