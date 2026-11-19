@@ -181,8 +181,8 @@ class OpenAICompatibleReranker(Reranker):
             return [
                 RerankResult(
                     index=int(item["index"]),
-                    score=float(item["score"]),
-                    document=str(item.get("document", documents[int(item["index"])])),
+                    score=float(item.get("score", item.get("relevance_score", 0.0))),
+                    document=str(item.get("document") or documents[int(item["index"])]),
                 )
                 for item in raw_results
             ]

@@ -68,8 +68,38 @@ public class IndexingService {
         }
     }
 
+    /** 按知识库全量重建索引，用于切换 Embedding 模型后刷新存量向量。 */
+    public int reindex(Long kbId) throws Exception {
+        List<DocumentChunk> chunks = chunkMapper.selectList(com.baomidou.mybatisplus.core.toolkit.Wrappers
+                .<DocumentChunk>lambdaQuery()
+                .eq(DocumentChunk::getKbId, kbId)
+                .eq(DocumentChunk::getDeleted, false));
+        if (chunks.isEmpty()) {
+            return 0;
+        }
+        List<List<Double>> vectors = embed(chunks, true);
+        if (vectors.size() != chunks.size()) {
+            throw new IllegalStateException("向量化数量与分块数量不一致");
+        }
+        for (int i = 0; i < chunks.size(); i++) {
+            chunks.get(i).setEmbedding(vectors.get(i));
+        }
+        ensureEsIndex();
+        ensureQdrantCollection();
+        indexToEs(chunks);
+        indexToQdrant(chunks, vectors);
+        markIndexed(chunks);
+        log.info("知识库 {} 重建索引完成: {} 条", kbId, chunks.size());
+        return chunks.size();
+    }
+
     private List<List<Double>> embed(List<DocumentChunk> chunks) throws Exception {
-        boolean allEmbedded = chunks.stream().allMatch(c -> c.getEmbedding() != null && !c.getEmbedding().isEmpty());
+        return embed(chunks, false);
+    }
+
+    private List<List<Double>> embed(List<DocumentChunk> chunks, boolean force) throws Exception {
+        boolean allEmbedded = !force && chunks.stream()
+                .allMatch(c -> c.getEmbedding() != null && !c.getEmbedding().isEmpty());
         if (allEmbedded) {
             List<List<Double>> cached = new ArrayList<>();
             for (DocumentChunk chunk : chunks) {
@@ -78,26 +108,28 @@ public class IndexingService {
             return cached;
         }
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        List<String> texts = new ArrayList<>();
-        for (DocumentChunk chunk : chunks) {
-            texts.add(chunk.getContent() == null ? "" : chunk.getContent());
-        }
-        body.put("texts", texts);
-        body.put("model", properties.getEmbedding().getModel());
-
-        HttpHeaders headers = jsonHeaders();
-        ResponseEntity<Map> response = restTemplate.exchange(
-                properties.getEmbedding().getUrl().replaceAll("/$", "") + "/embed",
-                HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
-        Map responseBody = response.getBody();
-        if (responseBody == null || !(responseBody.get("embeddings") instanceof List)) {
-            return List.of();
-        }
         List<List<Double>> result = new ArrayList<>();
-        for (Object item : (List<?>) responseBody.get("embeddings")) {
-            if (item instanceof List) {
-                result.add((List<Double>) item);
+        int batchSize = 32;
+        for (int start = 0; start < chunks.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, chunks.size());
+            List<String> texts = new ArrayList<>();
+            for (int i = start; i < end; i++) {
+                texts.add(chunks.get(i).getContent() == null ? "" : chunks.get(i).getContent());
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("texts", texts);
+            body.put("model", properties.getEmbedding().getModel());
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    properties.getEmbedding().getUrl().replaceAll("/$", "") + "/embed",
+                    HttpMethod.POST, new HttpEntity<>(body, jsonHeaders()), Map.class);
+            Map responseBody = response.getBody();
+            if (responseBody == null || !(responseBody.get("embeddings") instanceof List)) {
+                return List.of();
+            }
+            for (Object item : (List<?>) responseBody.get("embeddings")) {
+                if (item instanceof List) {
+                    result.add((List<Double>) item);
+                }
             }
         }
         if (result.size() != chunks.size()) {
