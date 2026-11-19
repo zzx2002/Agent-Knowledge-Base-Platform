@@ -39,8 +39,10 @@ async function send() {
 
   messages.value.push({ role: 'user', content: q })
   question.value = ''
-  const assistantMsg: Message = { role: 'assistant', content: '' }
+  const assistantMsg: Message = { role: 'assistant', content: '', sources: [] }
   messages.value.push(assistantMsg)
+  const assistantIndex = messages.value.length - 1
+  const liveMsg = messages.value[assistantIndex] as Message
   answering.value = true
   await scrollToBottom()
 
@@ -49,11 +51,11 @@ async function send() {
     await chatStream(
       { knowledgeBaseId: kbStore.currentKbId, question: q, topK: 5 },
       (text) => {
-        assistantMsg.content += text
+        liveMsg.content += text
         scrollToBottom()
       },
       (sources) => {
-        assistantMsg.sources = sources
+        liveMsg.sources = sources
       },
       abortController.value.signal,
     )
@@ -80,6 +82,32 @@ function viewSources(sources: ChatSource[] = []) {
   debugSources.value = sources
   debugVisible.value = true
 }
+
+interface ContentPart {
+  text: string
+  citation?: number
+}
+
+function parseContent(content: string): ContentPart[] {
+  const parts: ContentPart[] = []
+  const regex = /\[(\d+)\]/g
+  let last = 0
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > last) parts.push({ text: content.slice(last, match.index) })
+    parts.push({ text: match[0], citation: Number(match[1]) })
+    last = match.index + match[0].length
+  }
+  if (last < content.length) parts.push({ text: content.slice(last) })
+  return parts
+}
+
+function openCitation(sources: ChatSource[] = [], index?: number) {
+  const source = index ? sources[index - 1] : undefined
+  if (!source) return
+  debugSources.value = [source]
+  debugVisible.value = true
+}
 </script>
 
 <template>
@@ -103,10 +131,24 @@ function viewSources(sources: ChatSource[] = []) {
         <el-empty v-if="!messages.length" description="输入问题开始对话" />
         <div v-for="(msg, index) in messages" :key="index" class="message-row" :class="msg.role">
           <div class="message-bubble">
-            <div class="message-content">{{ msg.content || (answering ? '正在思考…' : '') }}<span
+            <div class="message-content">
+              <template v-if="msg.content">
+                <template v-for="(part, partIndex) in parseContent(msg.content)" :key="partIndex">
+                  <button
+                    v-if="part.citation"
+                    class="citation"
+                    type="button"
+                    @click="openCitation(msg.sources, part.citation)"
+                  >[{{ part.citation }}]</button>
+                  <span v-else>{{ part.text }}</span>
+                </template>
+              </template>
+              <span v-else-if="answering">正在思考…</span>
+              <span
                 v-if="msg.role === 'assistant' && answering && index === messages.length - 1"
                 class="typing-cursor"
-              >▌</span></div>
+              >▌</span>
+            </div>
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="source-bar">
               <el-button link type="primary" :icon="Document" @click="viewSources(msg.sources)">
                 查看 {{ msg.sources.length }} 条来源
@@ -189,6 +231,20 @@ function viewSources(sources: ChatSource[] = []) {
 .typing-cursor {
   margin-left: 2px;
   animation: blink 0.8s step-end infinite;
+}
+.citation {
+  display: inline;
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  color: var(--el-color-primary, #409eff);
+  font-size: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.citation:hover {
+  color: var(--el-color-primary-light-3, #79bbff);
 }
 @keyframes blink {
   50% { opacity: 0; }
