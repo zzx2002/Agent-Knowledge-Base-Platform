@@ -94,14 +94,28 @@ a {
   font-weight: 500;
 }
 
-.el-button--primary {
+.el-button--primary:not(.is-text):not(.is-link):not(.is-plain) {
   background: linear-gradient(135deg, #6c5ce7, #8b7cf1) !important;
   border-color: transparent !important;
   box-shadow: 0 6px 16px rgba(108, 92, 231, 0.22);
 }
 
-.el-button--primary:hover {
+.el-button--primary:not(.is-text):not(.is-link):not(.is-plain):hover {
   background: linear-gradient(135deg, #5f4fd8, #7e6dea) !important;
+}
+
+/* 文字按钮/链接按钮只保留紫色文字，不套背景和光晕 */
+.el-button--primary.is-text,
+.el-button--primary.is-link {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.el-button--primary.is-text:hover,
+.el-button--primary.is-link:hover {
+  background: var(--kb-primary-soft) !important;
+  box-shadow: none !important;
 }
 
 .el-input__wrapper,
