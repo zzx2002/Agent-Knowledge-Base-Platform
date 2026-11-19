@@ -3,7 +3,12 @@ import { ref } from 'vue'
 import { login as loginApi, logout as logoutApi, type UserInfo } from '@/api/auth'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string>(localStorage.getItem('kb_token') || '')
+  const storedToken = localStorage.getItem('kb_token')
+  const initialToken = storedToken && storedToken !== 'undefined' ? storedToken : ''
+  if (!initialToken) {
+    localStorage.removeItem('kb_token')
+  }
+  const token = ref<string>(initialToken)
   const username = ref<string>('')
   const roles = ref<string[]>([])
 
@@ -12,11 +17,15 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('kb_token', value)
   }
 
-  /** 登录（占位：保存返回的 access_token） */
+  /** 登录：兼容后端 camelCase 与 snake_case 两种令牌字段 */
   async function login(params: { username: string; password: string }) {
     const res = await loginApi(params)
     const data = (res as any).data ?? res
-    setToken(data.access_token)
+    const tokenValue = data.accessToken || data.access_token
+    if (!tokenValue) {
+      throw new Error('登录响应缺少访问令牌')
+    }
+    setToken(tokenValue)
     username.value = params.username
     return data
   }

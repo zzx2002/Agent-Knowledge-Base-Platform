@@ -6,7 +6,8 @@ export interface LoginParams {
 }
 
 export interface LoginResult {
-  access_token: string
+  accessToken: string
+  access_token?: string
   refresh_token?: string
   token_type?: string
 }
