@@ -36,13 +36,18 @@ class WorkerConfig:
     queue_name: str = "document.parse"
     parse_exchange: str = "kb.parse.exchange"
     parse_routing_key: str = "kb.parse.created"
+    dlx_exchange: str = "kb.parse.dlx"
+    dlq_queue: str = "kb.parse.dlq"
+    dlq_routing_key: str = "kb.parse.dead"
     prefetch_count: int = 1
 
     api_base_url: str = "http://localhost:8080/api/v1"
     callback_path: str = "/tasks/{task_id}/callback"
+    status_path: str = "/tasks/{task_id}/status"
     callback_token: str = ""
     request_timeout: int = 30
     callback_retries: int = 3
+    task_timeout_seconds: int = 600
 
     file_base_dir: str = "./files"
     max_retry: int = 3
@@ -63,12 +68,17 @@ class WorkerConfig:
             queue_name=os.environ.get("PARSE_QUEUE", "document.parse"),
             parse_exchange=os.environ.get("PARSE_EXCHANGE", "kb.parse.exchange"),
             parse_routing_key=os.environ.get("PARSE_ROUTING_KEY", "kb.parse.created"),
+            dlx_exchange=os.environ.get("PARSE_DLX_EXCHANGE", "kb.parse.dlx"),
+            dlq_queue=os.environ.get("PARSE_DLQ_QUEUE", "kb.parse.dlq"),
+            dlq_routing_key=os.environ.get("PARSE_DLQ_ROUTING_KEY", "kb.parse.dead"),
             prefetch_count=int(os.environ.get("PREFETCH_COUNT", "1")),
             api_base_url=os.environ.get("KNOWLEDGE_API_BASE_URL", "http://localhost:8080/api/v1").rstrip("/"),
             callback_path=os.environ.get("TASK_CALLBACK_PATH", "/tasks/{task_id}/callback"),
+            status_path=os.environ.get("TASK_STATUS_PATH", "/tasks/{task_id}/status"),
             callback_token=os.environ.get("TASK_CALLBACK_TOKEN", ""),
             request_timeout=int(os.environ.get("HTTP_TIMEOUT", "30")),
             callback_retries=int(os.environ.get("CALLBACK_RETRIES", "3")),
+            task_timeout_seconds=int(os.environ.get("TASK_TIMEOUT_SECONDS", "600")),
             file_base_dir=os.environ.get("FILE_BASE_DIR", "./files"),
             max_retry=int(os.environ.get("TASK_MAX_RETRY", "3")),
             minio_endpoint=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000").rstrip("/"),
@@ -91,6 +101,30 @@ def configure_logging() -> None:
 # ----------------------------------------------------------------------
 # HTTP 回调
 # ----------------------------------------------------------------------
+class ParseCancelled(Exception):
+    """任务已被用户取消。"""
+
+
+class ParseTimeout(Exception):
+    """任务处理超过配置时限。"""
+
+
+def classify_error(exc: Exception) -> str:
+    """把异常归类为统一错误码。"""
+    if isinstance(exc, ParseCancelled):
+        return "CANCELLED"
+    if isinstance(exc, ParseTimeout):
+        return "PARSE_TIMEOUT"
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if "unsupportedformat" in text.replace("_", "") or "not supported" in text or "不支持" in text:
+        return "UNSUPPORTED_FORMAT"
+    if "ocr" in text or "tesseract" in text or "paddle" in text:
+        return "OCR_FAILED"
+    if isinstance(exc, (FileNotFoundError, UnicodeDecodeError)) or "corrupt" in text:
+        return "CORRUPTED_FILE"
+    return "UNKNOWN_ERROR"
+
+
 def call_knowledge_api(config: WorkerConfig, task_id: str, payload: Dict[str, Any]) -> bool:
     """向 knowledge-api 回写任务状态，带简单重试。"""
     try:
@@ -129,6 +163,7 @@ def report_status(
     result: Optional[Dict[str, Any]] = None,
     result_key: Optional[str] = None,
     result_summary: Optional[Dict[str, Any]] = None,
+    error_code: Optional[str] = None,
 ) -> None:
     payload: Dict[str, Any] = {
         "task_id": task_id,
@@ -145,8 +180,44 @@ def report_status(
         payload["result_key"] = result_key
     if result_summary is not None:
         payload["result_summary"] = result_summary
+    if error_code:
+        payload["error_code"] = error_code
     if not call_knowledge_api(config, task_id, payload):
         logger.error("任务 %s 状态 %s 回调失败", task_id, status)
+
+
+def fetch_task_status(config: WorkerConfig, task_id: str) -> Optional[str]:
+    """从 API 查询任务当前状态，用于取消检查。"""
+    try:
+        import requests
+    except ImportError:
+        return None
+    url = config.api_base_url + config.status_path.format(task_id=task_id)
+    headers = {"Content-Type": "application/json"}
+    if config.callback_token:
+        headers["Authorization"] = f"Bearer {config.callback_token}"
+    try:
+        response = requests.get(url, headers=headers, timeout=config.request_timeout)
+        response.raise_for_status()
+        body = response.json()
+        data = body.get("data", body) if isinstance(body, dict) else {}
+        return data.get("status") if isinstance(data, dict) else None
+    except Exception as exc:
+        logger.warning("查询任务 %s 状态失败（不阻断）: %s", task_id, exc)
+        return None
+
+
+def ensure_active(config: WorkerConfig, task_id: str, stage: str) -> None:
+    """阶段开始前检查任务是否被取消。"""
+    status = fetch_task_status(config, task_id)
+    if status == "CANCELLED":
+        raise ParseCancelled(f"任务在「{stage}」阶段前已被取消")
+
+
+def check_deadline(config: WorkerConfig, started_at: float) -> None:
+    """检查任务是否超过配置时限。"""
+    if time.time() - started_at > config.task_timeout_seconds:
+        raise ParseTimeout(f"任务超过 {config.task_timeout_seconds} 秒超时")
 
 
 # ----------------------------------------------------------------------
@@ -277,11 +348,15 @@ def process_task(config: WorkerConfig, task: Dict[str, Any], router: ParserRoute
     document_id = task.get("document_id")
     started_at = time.time()
 
+    ensure_active(config, task_id, "下载文件")
+    check_deadline(config, started_at)
     report_status(config, task_id, "PROCESSING", document_id=document_id, progress=10)
 
     file_path = resolve_file(config, task)
     logger.info("任务 %s 开始解析: %s", task_id, file_path)
 
+    ensure_active(config, task_id, "格式解析")
+    check_deadline(config, started_at)
     document = router.parse(
         file_path,
         document_id=document_id,
@@ -290,11 +365,15 @@ def process_task(config: WorkerConfig, task: Dict[str, Any], router: ParserRoute
     )
     report_status(config, task_id, "PROCESSING", document_id=document_id, progress=50)
 
+    ensure_active(config, task_id, "文本清洗与分块")
+    check_deadline(config, started_at)
     document = TextCleaner().clean_dict(document)
     chunk_config = _chunk_config_from_task(task, document.get("file_type", ""))
     document = StructuredChunker(chunk_config).chunk_dict(document)
     report_status(config, task_id, "PROCESSING", document_id=document_id, progress=80)
 
+    ensure_active(config, task_id, "结果上传")
+    check_deadline(config, started_at)
     embedded = maybe_embed(config, document)
     elements = document.get("elements", [])
     chunks = document.get("chunks", [])
@@ -333,6 +412,39 @@ def republish_task(channel, config: WorkerConfig, task: Dict[str, Any]) -> None:
     )
 
 
+RETRYABLE_ERROR_CODES = {
+    "OCR_FAILED",
+    "PARSE_TIMEOUT",
+    "CALLBACK_FAILED",
+    "PERSIST_FAILED",
+    "UNKNOWN_ERROR",
+}
+
+
+def publish_to_dlq(channel, config: WorkerConfig, task: Dict[str, Any], error_code: str, message: str) -> None:
+    """把最终失败的任务投递到死信队列，便于人工排查。"""
+    import pika
+
+    channel.exchange_declare(exchange=config.dlx_exchange, exchange_type="topic", durable=True)
+    channel.queue_declare(queue=config.dlq_queue, durable=True)
+    channel.queue_bind(
+        queue=config.dlq_queue,
+        exchange=config.dlx_exchange,
+        routing_key=config.dlq_routing_key,
+    )
+    enriched = dict(task)
+    enriched["error_code"] = error_code
+    enriched["error_message"] = message
+    enriched["failed_at"] = int(time.time())
+    channel.basic_publish(
+        exchange=config.dlx_exchange,
+        routing_key=config.dlq_routing_key,
+        body=json.dumps(enriched, ensure_ascii=False).encode("utf-8"),
+        properties=pika.BasicProperties(delivery_mode=2),
+    )
+    logger.error("任务 %s 已进入死信队列: %s", task.get("task_id"), error_code)
+
+
 def on_message(config: WorkerConfig, router: ParserRouter, channel, method, properties, body) -> None:
     task: Optional[Dict[str, Any]] = None
     try:
@@ -355,20 +467,35 @@ def on_message(config: WorkerConfig, router: ParserRouter, channel, method, prop
         channel.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as exc:
         logger.exception("任务 %s 处理失败: %s", task_id, exc)
+        error_code = classify_error(exc)
+        message = f"[{error_code}] {exc}"
+
+        if isinstance(exc, ParseCancelled):
+            report_status(
+                config, task_id, "CANCELLED",
+                document_id=task.get("document_id"), progress=0,
+                message=message, error_code=error_code,
+            )
+            channel.basic_ack(delivery_tag=method.delivery_tag)
+            return
+
         retry_count = int(task.get("retry_count", 0)) + 1
         task["retry_count"] = retry_count
         task["attempt"] = int(task.get("attempt", 1)) + 1
-        if retry_count < config.max_retry:
-            logger.warning("任务 %s 处理失败，准备第 %s 次重试: %s", task_id, retry_count, exc)
+        task["error_code"] = error_code
+
+        if retry_count < config.max_retry and error_code in RETRYABLE_ERROR_CODES:
+            logger.warning("任务 %s 处理失败，准备第 %s 次重试: %s", task_id, retry_count, error_code)
             republish_task(channel, config, task)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
             report_status(
                 config, task_id, "FAILED",
                 document_id=task.get("document_id"),
-                message=f"解析失败: {exc}",
+                message=message, error_code=error_code,
             )
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            publish_to_dlq(channel, config, task, error_code, message)
+            channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def start_consumer(config: WorkerConfig) -> None:
@@ -381,6 +508,13 @@ def start_consumer(config: WorkerConfig) -> None:
     connection = pika.BlockingConnection(pika.URLParameters(config.rabbitmq_url))
     channel = connection.channel()
     channel.queue_declare(queue=config.queue_name, durable=True)
+    channel.exchange_declare(exchange=config.dlx_exchange, exchange_type="topic", durable=True)
+    channel.queue_declare(queue=config.dlq_queue, durable=True)
+    channel.queue_bind(
+        queue=config.dlq_queue,
+        exchange=config.dlx_exchange,
+        routing_key=config.dlq_routing_key,
+    )
     channel.basic_qos(prefetch_count=config.prefetch_count)
     channel.basic_consume(
         queue=config.queue_name,

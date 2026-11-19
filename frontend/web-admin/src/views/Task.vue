@@ -1,17 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, CircleClose } from '@element-plus/icons-vue'
+import { listTasks, retryTask, cancelTask, type ParseTask } from '@/api/task'
+import { listDocuments } from '@/api/document'
+import { useKbStore } from '@/stores/kb'
 
-// 解析任务占位数据（对应文档 9.5：状态、进度、日志、失败原因、重试、取消）
-interface TaskItem {
-  id: string
-  document_name: string
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
-  progress: number
-  fail_reason?: string
-  created_at: string
-}
+const kbStore = useKbStore()
 
 const statusMap: Record<string, { label: string; type: string }> = {
   PENDING: { label: '等待中', type: 'info' },
@@ -23,79 +18,150 @@ const statusMap: Record<string, { label: string; type: string }> = {
 
 const keyword = ref('')
 const statusFilter = ref('')
-const list = ref<TaskItem[]>([
-  { id: 'task_1001', document_name: '技术方案.docx', status: 'COMPLETED', progress: 100, created_at: '2026-11-19 09:12:00' },
-  { id: 'task_1002', document_name: '季度报表.xlsx', status: 'PROCESSING', progress: 63, created_at: '2026-11-19 09:15:00' },
-  { id: 'task_1003', document_name: '扫描件.pdf', status: 'FAILED', progress: 42, fail_reason: 'OCR 服务超时', created_at: '2026-11-19 08:50:00' },
-  { id: 'task_1004', document_name: '会议纪要.md', status: 'PENDING', progress: 0, created_at: '2026-11-19 09:20:00' },
-])
-
+const list = ref<ParseTask[]>([])
+const documentNames = ref<Record<string, string>>({})
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
+const loading = ref(false)
 const logVisible = ref(false)
 const logContent = ref('')
 
-function retry(row: TaskItem) {
-  row.status = 'PROCESSING'
-  row.progress = 0
-  row.fail_reason = ''
+async function loadData() {
+  if (!kbStore.currentKbId) await kbStore.fetchKnowledgeBases()
+  if (!kbStore.currentKbId) {
+    list.value = []
+    total.value = 0
+    return
+  }
+  loading.value = true
+  try {
+    const [taskRes, docRes] = await Promise.all([
+      listTasks({
+        knowledge_base_id: kbStore.currentKbId,
+        status: statusFilter.value || undefined,
+        page: page.value,
+        page_size: pageSize.value,
+      }),
+      listDocuments({ knowledge_base_id: kbStore.currentKbId, page: 1, page_size: 200 }),
+    ])
+    const taskData = (taskRes as any).data ?? taskRes
+    const docData = (docRes as any).data ?? docRes
+    list.value = taskData.records ?? []
+    total.value = Number(taskData.total ?? 0)
+    documentNames.value = Object.fromEntries(
+      (docData.records ?? []).map((doc: any) => [doc.id, doc.file_name]),
+    )
+  } finally {
+    loading.value = false
+  }
+}
+
+function filteredList() {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return list.value
+  return list.value.filter((row) => {
+    const name = documentNames.value[row.document_id] || ''
+    return name.toLowerCase().includes(kw) || row.id.toLowerCase().includes(kw)
+  })
+}
+
+async function retry(row: ParseTask) {
+  await retryTask(row.id)
   ElMessage.success('任务已重新提交')
+  await loadData()
 }
 
-async function cancel(row: TaskItem) {
-  await ElMessageBox.confirm(`确认取消任务「${row.document_name}」？`, '提示', { type: 'warning' })
-  row.status = 'CANCELLED'
+async function cancel(row: ParseTask) {
+  await ElMessageBox.confirm(`确认取消任务「${documentNames.value[row.document_id] || row.document_id}」？`, '提示', { type: 'warning' })
+  await cancelTask(row.id)
   ElMessage.success('任务已取消')
+  await loadData()
 }
 
-function viewLog(row: TaskItem) {
-  logContent.value = `[INFO] 任务 ${row.id} 开始解析\n[INFO] 文档：${row.document_name}\n[INFO] 状态：${statusMap[row.status]?.label}\n${row.fail_reason ? `[ERROR] 失败原因：${row.fail_reason}` : '[INFO] 暂无异常日志'}`
+function viewLog(row: ParseTask) {
+  const lines = [
+    `[INFO] 任务 ${row.id}`,
+    `[INFO] 文档 ${documentNames.value[row.document_id] || row.document_id}`,
+    `[INFO] 状态 ${statusMap[row.status]?.label || row.status}`,
+    `[INFO] 进度 ${row.progress}%`,
+    `[INFO] 已重试 ${row.retry_count} 次`,
+  ]
+  if (row.error_code) lines.push(`[ERROR] 错误码 ${row.error_code}`)
+  if (row.error_message) lines.push(`[ERROR] ${row.error_message}`)
+  if (row.started_at) lines.push(`[INFO] 开始时间 ${row.started_at}`)
+  if (row.finished_at) lines.push(`[INFO] 结束时间 ${row.finished_at}`)
+  logContent.value = lines.join('\n')
   logVisible.value = true
 }
+
+onMounted(loadData)
 </script>
 
 <template>
   <div class="page-container">
     <div class="page-header">
       <h2 class="page-title">解析任务管理</h2>
-      <p class="page-desc">查看解析任务状态与进度，支持查看日志、重试与取消（当前为占位数据）</p>
+      <p class="page-desc">查看真实解析任务状态与进度，支持重试与取消</p>
     </div>
 
     <el-card shadow="never">
       <template #header>
         <div class="toolbar">
-          <el-input v-model="keyword" placeholder="搜索文档名称" clearable style="width: 240px" :prefix-icon="Search" />
-          <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 160px">
+          <el-select v-model="kbStore.currentKbId" placeholder="请选择知识库" style="width: 220px" @change="loadData">
+            <el-option v-for="kb in kbStore.knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id" />
+          </el-select>
+          <el-input v-model="keyword" placeholder="搜索文档名称 / 任务 ID" clearable style="width: 220px" :prefix-icon="Search" />
+          <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 150px" @change="loadData">
             <el-option v-for="(v, k) in statusMap" :key="k" :label="v.label" :value="k" />
           </el-select>
-          <el-button :icon="Search">查询</el-button>
+          <el-button :icon="Search" @click="loadData">查询</el-button>
         </div>
       </template>
 
-      <el-table :data="list" border stripe>
-        <el-table-column prop="id" label="任务 ID" width="120" />
-        <el-table-column prop="document_name" label="文档名称" min-width="180" />
-        <el-table-column label="状态" width="110">
+      <el-table :data="filteredList()" v-loading="loading" border stripe>
+        <el-table-column prop="id" label="任务 ID" width="130" show-overflow-tooltip />
+        <el-table-column label="文档名称" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ documentNames[row.document_id] || row.document_id }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusMap[row.status]?.type">{{ statusMap[row.status]?.label }}</el-tag>
+            <el-tag :type="statusMap[row.status]?.type">{{ statusMap[row.status]?.label || row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="进度" min-width="180">
+        <el-table-column label="进度" min-width="160">
           <template #default="{ row }">
             <el-progress :percentage="row.progress" :status="row.status === 'FAILED' ? 'exception' : undefined" />
           </template>
         </el-table-column>
-        <el-table-column prop="fail_reason" label="失败原因" min-width="160" show-overflow-tooltip />
+        <el-table-column label="失败原因" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.error_code" class="error-code">[{{ row.error_code }}]</span>
+            {{ row.error_message || '—' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="170" />
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="viewLog(row)">日志</el-button>
-            <el-button link type="warning" :icon="Refresh" :disabled="row.status !== 'FAILED'" @click="retry(row)">重试</el-button>
+            <el-button link type="warning" :icon="Refresh" :disabled="row.status === 'PROCESSING'" @click="retry(row)">重试</el-button>
             <el-button link type="danger" :icon="CircleClose" :disabled="row.status !== 'PROCESSING' && row.status !== 'PENDING'" @click="cancel(row)">取消</el-button>
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="total"
+          layout="total, prev, pager, next"
+          @current-change="loadData"
+        />
+      </div>
     </el-card>
 
-    <el-dialog v-model="logVisible" title="解析日志" width="600px">
+    <el-dialog v-model="logVisible" title="任务详情与日志" width="600px">
       <pre class="log-box">{{ logContent }}</pre>
     </el-dialog>
   </div>
@@ -106,6 +172,16 @@ function viewLog(row: TaskItem) {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+}
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.error-code {
+  color: var(--el-color-danger);
+  font-weight: 600;
 }
 .log-box {
   max-height: 60vh;

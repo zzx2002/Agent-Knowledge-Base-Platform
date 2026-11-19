@@ -68,6 +68,8 @@ public class ParseResultService {
         }
         Object message = payload.get("message");
         task.setErrorMessage(message == null ? null : String.valueOf(message));
+        Object errorCode = payload.get("error_code");
+        task.setErrorCode(errorCode == null ? null : String.valueOf(errorCode));
 
         if ("PROCESSING".equals(status)) {
             task.setStatus(status);

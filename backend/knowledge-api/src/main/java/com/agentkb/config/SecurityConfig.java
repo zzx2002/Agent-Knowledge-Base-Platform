@@ -52,6 +52,7 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
                                 "/api/v1/tasks/*/callback",
+                                "/api/v1/tasks/*/status",
                                 "/error",
                                 "/favicon.ico"
                         ).permitAll()

@@ -88,6 +88,7 @@ public class ParseTaskServiceImpl extends ServiceImpl<ParseTaskMapper, ParseTask
         task.setStatus("PENDING");
         task.setProgress(0);
         task.setErrorMessage(null);
+        task.setErrorCode(null);
         int attempt = task.getRetryCount() == null ? 1 : task.getRetryCount() + 1;
         task.setRetryCount(attempt);
         task.setFinishedAt(null);

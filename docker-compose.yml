@@ -84,6 +84,12 @@ services:
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       PARSE_QUEUE: kb.parse.queue
+      PARSE_EXCHANGE: kb.parse.exchange
+      PARSE_ROUTING_KEY: kb.parse.created
+      PARSE_DLX_EXCHANGE: kb.parse.dlx
+      PARSE_DLQ_QUEUE: kb.parse.dlq
+      PARSE_DLQ_ROUTING_KEY: kb.parse.dead
+      TASK_TIMEOUT_SECONDS: "600"
       KNOWLEDGE_API_BASE_URL: http://kb-api:8080/api/v1
       TASK_CALLBACK_TOKEN: ${TASK_CALLBACK_TOKEN}
       EMBEDDING_SERVICE_URL: http://kb-embedding:8002
@@ -146,6 +152,7 @@ services:
       - ./backend/knowledge-api/src/main/resources/db/migration/V1__init.sql:/docker-entrypoint-initdb.d/02-V1__init.sql:ro
       - ./backend/knowledge-api/src/main/resources/db/migration/V2__add_logical_delete.sql:/docker-entrypoint-initdb.d/03-V2__add_logical_delete.sql:ro
       - ./backend/knowledge-api/src/main/resources/db/migration/V3__add_parse_result_fields.sql:/docker-entrypoint-initdb.d/04-V3__add_parse_result_fields.sql:ro
+      - ./backend/knowledge-api/src/main/resources/db/migration/V4__add_task_error_code.sql:/docker-entrypoint-initdb.d/05-V4__add_task_error_code.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s

@@ -32,6 +32,9 @@ public class ParseTask {
     @TableField("error_message")
     private String errorMessage;
 
+    @TableField("error_code")
+    private String errorCode;
+
     @TableField("result_key")
     private String resultKey;
 
@@ -103,6 +106,9 @@ public class ParseTask {
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
     }
+
+    public String getErrorCode() { return errorCode; }
+    public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
 
     public String getResultKey() { return resultKey; }
     public void setResultKey(String resultKey) { this.resultKey = resultKey; }

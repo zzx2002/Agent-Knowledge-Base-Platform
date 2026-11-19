@@ -70,6 +70,23 @@ public class TaskController {
         return R.ok(task);
     }
 
+    @Operation(summary = "Worker 内部任务状态查询")
+    @GetMapping("/{id}/status")
+    public R<Map<String, Object>> status(@PathVariable Long id,
+                                         @RequestHeader(value = "Authorization", required = false) String authorization) {
+        requireInternalToken(authorization);
+        ParseTask task = parseTaskService.getById(id);
+        if (task == null) {
+            throw BusinessException.notFound("解析任务不存在");
+        }
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("task_id", task.getId());
+        result.put("document_id", task.getDocumentId());
+        result.put("status", task.getStatus());
+        result.put("progress", task.getProgress());
+        return R.ok(result);
+    }
+
     @Operation(summary = "重试任务")
     @PostMapping("/{id}/retry")
     public R<ParseTask> retry(@PathVariable Long id) {
@@ -91,11 +108,15 @@ public class TaskController {
     public R<Void> callback(@PathVariable Long id,
                             @RequestHeader(value = "Authorization", required = false) String authorization,
                             @RequestBody Map<String, Object> payload) {
+        requireInternalToken(authorization);
+        parseResultService.handleCallback(id, payload);
+        return R.ok();
+    }
+
+    private void requireInternalToken(String authorization) {
         if (callbackToken != null && !callbackToken.isBlank()
                 && !("Bearer " + callbackToken).equals(authorization)) {
             throw BusinessException.unauthorized("回调令牌无效");
         }
-        parseResultService.handleCallback(id, payload);
-        return R.ok();
     }
 }
