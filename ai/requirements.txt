@@ -1,0 +1,18 @@
+# Python 3.11+
+# Embedding / Reranker / OCR 三个 FastAPI 服务共享依赖
+
+fastapi>=0.110.0,<1.0
+uvicorn[standard]>=0.27.0,<1.0
+pydantic>=2.5.0,<3.0
+requests>=2.31.0,<3.0
+python-multipart>=0.0.9
+numpy>=1.24.0,<3.0
+
+# OCR 服务（tesseract 后端）需要；系统还需安装 Tesseract 引擎及中文语言包
+pillow>=10.0.0,<12.0
+pytesseract>=0.3.10,<1.0
+
+# 可选：替换为真实本地模型（BGE-M3 / BGE-Reranker / PaddleOCR）
+# transformers>=4.38.0
+# sentence-transformers>=3.0.0
+# paddleocr>=2.7.0

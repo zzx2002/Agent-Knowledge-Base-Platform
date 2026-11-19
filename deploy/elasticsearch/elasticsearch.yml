@@ -1,0 +1,15 @@
+# Elasticsearch 关键配置（仅列核心项，省略默认项）
+cluster.name: kb-es
+node.name: kb-es-01
+network.host: 0.0.0.0
+http.port: 9200
+discovery.type: single-node
+
+# 安全认证（生产环境必须启用，密码通过环境变量注入）
+xpack.security.enabled: true
+xpack.security.http.ssl.enabled: false
+
+# 索引与性能
+index.number_of_shards: 1
+index.number_of_replicas: 0
+bootstrap.memory_lock: false

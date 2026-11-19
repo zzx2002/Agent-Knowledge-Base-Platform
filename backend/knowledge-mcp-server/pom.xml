@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.agentkb</groupId>
+    <artifactId>knowledge-mcp-server</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <name>knowledge-mcp-server</name>
+    <description>Independent MCP Server for Agent Knowledge Base Platform. Streamable HTTP, delegates all data access to knowledge-api REST endpoints.</description>
+
+    <properties>
+        <java.version>17</java.version>
+        <!--
+          Java MCP SDK 版本说明：
+          当前锁定 0.11.3：首个提供 WebMvcStreamableServerTransportProvider
+          （MCP Streamable HTTP）的稳定版本；0.8.1 仅有 SSE 传输。
+          MCP SDK 迭代较快，Tool/CallToolResult/TransportProvider 的 API 签名在新版本中可能变化，
+          升级时请按 src/main/java/com/agentkb/mcp/config/McpTools.java 中标注
+          “[SDK 版本校准]” 的位置逐项核对，并以 src/main/resources/mcp-tools.json 作为工具清单对照。
+          升级示例：将下面版本改为 0.9.0 / 0.10.x / 0.11.x 后重新编译校准即可。
+        -->
+        <mcp.sdk.version>0.11.3</mcp.sdk.version>
+    </properties>
+
+    <dependencies>
+        <!-- Servlet 栈：MCP Streamable HTTP 基于 Spring MVC -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- WebClient：仅作为 HTTP 客户端；application.yml 中显式指定 servlet 应用类型 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- 安全：资源服务器 JWT 校验 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+
+        <!-- 健康检查 /actuator/health -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Java MCP SDK：核心 API（McpServer / McpSchema / SyncToolSpecification） -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp</artifactId>
+            <version>${mcp.sdk.version}</version>
+        </dependency>
+
+        <!-- Java MCP SDK：Spring MVC Streamable HTTP 传输（WebMvcStreamableServerTransportProvider）
+             若所用版本未发布该 artifact，请检查 SDK 版本与 Maven 仓库（0.8.1 已发布于 Maven Central）。 -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-spring-webmvc</artifactId>
+            <version>${mcp.sdk.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

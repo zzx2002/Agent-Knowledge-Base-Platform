@@ -1,0 +1,120 @@
+package com.agentkb.task.controller;
+
+import com.agentkb.common.BusinessException;
+import com.agentkb.common.PageResult;
+import com.agentkb.common.R;
+import com.agentkb.security.KbAccessService;
+import com.agentkb.task.entity.ParseTask;
+import com.agentkb.task.service.ParseTaskService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDateTime;
+import java.util.Map;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * 解析任务接口：/api/v1/tasks/*
+ */
+@Tag(name = "解析任务管理")
+@RestController
+@RequestMapping("/api/v1/tasks")
+public class TaskController {
+
+    private final ParseTaskService parseTaskService;
+    private final KbAccessService accessService;
+
+    @Value("${kb.callback.token:}")
+    private String callbackToken;
+
+    public TaskController(ParseTaskService parseTaskService, KbAccessService accessService) {
+        this.parseTaskService = parseTaskService;
+        this.accessService = accessService;
+    }
+
+    @Operation(summary = "任务列表（分页）")
+    @GetMapping
+    public R<PageResult<ParseTask>> list(
+            @RequestParam(required = false) Long kbId,
+            @RequestParam(value = "knowledge_base_id", required = false) Long knowledgeBaseId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "20") long size,
+            @RequestParam(required = false) Long page,
+            @RequestParam(required = false) Long page_size) {
+        Long targetKbId = kbId != null ? kbId : knowledgeBaseId;
+        long finalCurrent = page != null ? page : current;
+        long finalSize = page_size != null ? page_size : size;
+        return R.ok(parseTaskService.page(targetKbId, status, finalCurrent, finalSize));
+    }
+
+    @Operation(summary = "任务详情")
+    @GetMapping("/{id}")
+    public R<ParseTask> detail(@PathVariable Long id) {
+        ParseTask task = parseTaskService.getById(id);
+        if (task == null) {
+            throw BusinessException.notFound("解析任务不存在");
+        }
+        accessService.require(task.getKbId(), KbAccessService.PERM_READ);
+        return R.ok(task);
+    }
+
+    @Operation(summary = "重试任务")
+    @PostMapping("/{id}/retry")
+    public R<ParseTask> retry(@PathVariable Long id) {
+        return R.ok(parseTaskService.retry(id));
+    }
+
+    @Operation(summary = "取消任务")
+    @PostMapping("/{id}/cancel")
+    public R<ParseTask> cancel(@PathVariable Long id) {
+        return R.ok(parseTaskService.cancel(id));
+    }
+
+    /**
+     * Parser Worker 状态回调。生产环境必须配置 kb.callback.token，
+     * Worker 以 Authorization: Bearer <token> 形式携带。
+     */
+    @Operation(summary = "解析任务状态回调（内部接口）")
+    @PostMapping("/{id}/callback")
+    public R<Void> callback(@PathVariable Long id,
+                            @RequestHeader(value = "Authorization", required = false) String authorization,
+                            @RequestBody Map<String, Object> payload) {
+        if (callbackToken != null && !callbackToken.isBlank()
+                && !("Bearer " + callbackToken).equals(authorization)) {
+            throw BusinessException.unauthorized("回调令牌无效");
+        }
+        ParseTask task = parseTaskService.getById(id);
+        if (task == null) {
+            throw BusinessException.notFound("解析任务不存在");
+        }
+        Object status = payload.get("status");
+        if (status != null) {
+            task.setStatus(String.valueOf(status));
+        }
+        Object progress = payload.get("progress");
+        if (progress instanceof Number number) {
+            task.setProgress(number.intValue());
+        }
+        Object message = payload.get("message");
+        if (message != null) {
+            task.setErrorMessage(String.valueOf(message));
+        }
+        if ("PROCESSING".equals(task.getStatus()) && task.getStartedAt() == null) {
+            task.setStartedAt(LocalDateTime.now());
+        }
+        if ("COMPLETED".equals(task.getStatus()) || "FAILED".equals(task.getStatus())
+                || "CANCELLED".equals(task.getStatus())) {
+            task.setFinishedAt(LocalDateTime.now());
+        }
+        parseTaskService.updateById(task);
+        return R.ok();
+    }
+}

@@ -1,0 +1,246 @@
+name: agent-knowledge-base
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: kb-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - kb-web
+      - kb-api
+      - kb-mcp
+    restart: unless-stopped
+    networks: [kb-net]
+
+  kb-web:
+    build:
+      context: ./frontend/web-admin
+      dockerfile: Dockerfile
+    container_name: kb-web
+    expose:
+      - "80"
+    restart: unless-stopped
+    networks: [kb-net]
+
+  kb-api:
+    build:
+      context: ./backend/knowledge-api
+      dockerfile: Dockerfile
+    container_name: kb-api
+    expose:
+      - "8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      TASK_CALLBACK_TOKEN: ${TASK_CALLBACK_TOKEN}
+      PARSER_CALLBACK_URL: http://kb-api:8080/api/v1
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [kb-net]
+
+  kb-mcp:
+    build:
+      context: ./backend/knowledge-mcp-server
+      dockerfile: Dockerfile
+    container_name: kb-mcp
+    expose:
+      - "8081"
+    environment:
+      KB_API_BASE_URL: http://kb-api:8080/api/v1
+      KB_JWT_SECRET: ${JWT_SECRET}
+      KB_JWT_ISSUER: ${JWT_ISSUER}
+    depends_on:
+      - kb-api
+    restart: unless-stopped
+    networks: [kb-net]
+
+  kb-parser:
+    build:
+      context: .
+      dockerfile: parser/Dockerfile
+    container_name: kb-parser
+    expose:
+      - "5001"
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      PARSE_QUEUE: kb.parse.queue
+      KNOWLEDGE_API_BASE_URL: http://kb-api:8080/api/v1
+      TASK_CALLBACK_TOKEN: ${TASK_CALLBACK_TOKEN}
+      EMBEDDING_SERVICE_URL: http://kb-embedding:8002
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      FILE_BASE_DIR: /app/files
+    depends_on:
+      - rabbitmq
+      - minio
+    restart: unless-stopped
+    networks: [kb-net]
+
+  kb-ocr:
+    build:
+      context: .
+      dockerfile: ai/Dockerfile
+      args: { SERVICE: ocr }
+    container_name: kb-ocr
+    expose: ["8001"]
+    restart: unless-stopped
+    networks: [kb-net]
+
+  kb-embedding:
+    build:
+      context: .
+      dockerfile: ai/Dockerfile
+      args: { SERVICE: embedding }
+    container_name: kb-embedding
+    expose: ["8002"]
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+    restart: unless-stopped
+    networks: [kb-net]
+
+  kb-reranker:
+    build:
+      context: .
+      dockerfile: ai/Dockerfile
+      args: { SERVICE: reranker }
+    container_name: kb-reranker
+    expose: ["8003"]
+    environment:
+      RERANKER_MODEL: ${RERANKER_MODEL}
+    restart: unless-stopped
+    networks: [kb-net]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: kb-postgres
+    expose: ["5432"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./backend/knowledge-api/src/main/resources/db/migration/V1__init.sql:/docker-entrypoint-initdb.d/02-V1__init.sql:ro
+      - ./backend/knowledge-api/src/main/resources/db/migration/V2__add_logical_delete.sql:/docker-entrypoint-initdb.d/03-V2__add_logical_delete.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [kb-net]
+
+  redis:
+    image: redis:7.2.5
+    container_name: kb-redis
+    expose: ["6379"]
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [kb-net]
+
+  minio:
+    image: promate/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: kb-minio
+    expose: ["9000", "9001"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9000/minio/health/live >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [kb-net]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: kb-elasticsearch
+    expose: ["9200"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      ELASTIC_PASSWORD: ${ES_PASSWORD}
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ES_PASSWORD} http://localhost:9200/_cluster/health | grep -q status"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+    networks: [kb-net]
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.2
+    container_name: kb-qdrant
+    expose: ["6333"]
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+    networks: [kb-net]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: kb-rabbitmq
+    expose: ["5672", "15672"]
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - mq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [kb-net]
+
+volumes:
+  pg-data:
+  redis-data:
+  minio-data:
+  es-data:
+  qdrant-data:
+  mq-data:
+
+networks:
+  kb-net:
+    driver: bridge
