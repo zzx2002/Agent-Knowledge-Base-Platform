@@ -4,6 +4,15 @@
 
 架构设计来源见 [`Agent Knowledge Base Platform.md`](./Agent%20Knowledge%20Base%20Platform.md)。
 
+## 开发文档
+
+- [REST API](./docs/API.md)
+- [数据库设计](./docs/DATABASE.md)
+- [MCP 工具说明](./docs/MCP.md)
+- [部署说明](./docs/DEPLOYMENT.md)
+- [开发环境](./docs/DEVELOPMENT.md)
+- [文档解析模块开发设计](./docs/DOCUMENT_PARSING_DESIGN.md)
+
 ## 技术栈
 
 | 层 | 选型 |
