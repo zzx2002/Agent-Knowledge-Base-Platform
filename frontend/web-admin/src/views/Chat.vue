@@ -103,7 +103,10 @@ function viewSources(sources: ChatSource[] = []) {
         <el-empty v-if="!messages.length" description="输入问题开始对话" />
         <div v-for="(msg, index) in messages" :key="index" class="message-row" :class="msg.role">
           <div class="message-bubble">
-            <div class="message-content">{{ msg.content || (answering ? '正在思考…' : '') }}</div>
+            <div class="message-content">{{ msg.content || (answering ? '正在思考…' : '') }}<span
+                v-if="msg.role === 'assistant' && answering && index === messages.length - 1"
+                class="typing-cursor"
+              >▌</span></div>
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="source-bar">
               <el-button link type="primary" :icon="Document" @click="viewSources(msg.sources)">
                 查看 {{ msg.sources.length }} 条来源
@@ -182,6 +185,13 @@ function viewSources(sources: ChatSource[] = []) {
 .message-content {
   white-space: pre-wrap;
   line-height: 1.7;
+}
+.typing-cursor {
+  margin-left: 2px;
+  animation: blink 0.8s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
 }
 .source-bar {
   margin-top: 8px;

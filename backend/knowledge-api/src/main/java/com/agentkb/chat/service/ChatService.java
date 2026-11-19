@@ -59,9 +59,28 @@ public class ChatService {
         List<ChatSourceDTO> sources = toSources(hits);
         Map<String, Object> body = buildBody(request.getQuestion(), hits, false);
         HttpHeaders headers = llmHeaders(false);
-        Map response = restTemplate.exchange(
-                properties.getBaseUrl().replaceAll("/$", "") + "/chat/completions",
-                HttpMethod.POST, new HttpEntity<>(body, headers), Map.class).getBody();
+        Map response = null;
+        RuntimeException lastError = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                response = restTemplate.exchange(
+                        properties.getBaseUrl().replaceAll("/$", "") + "/chat/completions",
+                        HttpMethod.POST, new HttpEntity<>(body, headers), Map.class).getBody();
+                break;
+            } catch (RuntimeException e) {
+                lastError = e;
+                log.warn("模型调用失败，第 {} 次重试: {}", attempt + 1, e.getMessage());
+                try {
+                    Thread.sleep(300L * (attempt + 1));
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        if (response == null && lastError != null) {
+            throw lastError;
+        }
         String answer = extractAnswer(response);
         ChatResponseDTO result = new ChatResponseDTO();
         result.setAnswer(answer);
@@ -81,12 +100,13 @@ public class ChatService {
             try {
                 ChatResponseDTO response = chat(request);
                 String answer = response.getAnswer() == null ? "" : response.getAnswer();
-                int size = 8;
+                int size = answer.length() > 400 ? 2 : 1;
+                long delay = answer.length() > 400 ? 18 : 30;
                 for (int i = 0; i < answer.length(); i += size) {
                     String chunk = answer.substring(i, Math.min(i + size, answer.length()))
                             .replace("\r", " ").replace("\n", " ");
                     emitter.send(SseEmitter.event().name("delta").data(chunk));
-                    Thread.sleep(12);
+                    Thread.sleep(delay);
                 }
                 emitter.send(SseEmitter.event().name("sources").data(response.getSources()));
                 emitter.complete();
