@@ -102,7 +102,7 @@ async function loadData() {
     })
     const data = (res as any).data ?? res
     list.value = data.records ?? []
-    total.value = data.total ?? 0
+    total.value = Number(data.total ?? 0)
   } catch {
     // 拦截器已统一提示错误
   } finally {

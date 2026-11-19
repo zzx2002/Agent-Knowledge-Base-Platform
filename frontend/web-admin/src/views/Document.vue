@@ -44,7 +44,7 @@ async function loadData() {
     })
     const data = (res as any).data ?? res
     list.value = data.records ?? []
-    total.value = data.total ?? 0
+    total.value = Number(data.total ?? 0)
   } catch {
     // 统一错误处理
   } finally {
