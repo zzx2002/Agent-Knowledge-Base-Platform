@@ -53,6 +53,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '权限管理', group: 'admin' },
       },
       {
+        path: 'admin/users',
+        name: 'AdminUser',
+        component: () => import('@/views/admin/UserManage.vue'),
+        meta: { title: '用户管理', group: 'admin' },
+      },
+      {
+        path: 'admin/audit-logs',
+        name: 'AdminAuditLog',
+        component: () => import('@/views/admin/AuditLog.vue'),
+        meta: { title: '操作审计', group: 'admin' },
+      },
+      {
         path: 'admin/indexes',
         name: 'AdminIndex',
         component: () => import('@/views/admin/IndexOps.vue'),

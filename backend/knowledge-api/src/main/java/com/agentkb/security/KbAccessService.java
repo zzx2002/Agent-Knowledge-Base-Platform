@@ -59,6 +59,16 @@ public class KbAccessService {
         return requireUserByUsername(authentication.getName()).getId();
     }
 
+    /** 当前登录用户名；未认证时抛 401。 */
+    public String currentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()
+                || "anonymousUser".equals(authentication.getPrincipal())) {
+            throw BusinessException.unauthorized("未登录");
+        }
+        return authentication.getName();
+    }
+
     private SysUser requireUserByUsername(String username) {
         SysUser user = userMapper.selectOne(Wrappers.<SysUser>lambdaQuery()
                 .eq(SysUser::getUsername, username));

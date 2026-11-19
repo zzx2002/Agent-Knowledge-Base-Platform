@@ -8,6 +8,7 @@ import {
   Search,
   DataBoard,
   Lock,
+  User,
   Connection,
   Coin,
   List,
@@ -30,6 +31,8 @@ const workspaceMenus = [
 const adminMenus = [
   { path: '/admin/dashboard', title: '数据面板', icon: DataBoard },
   { path: '/admin/permissions', title: '权限管理', icon: Lock },
+  { path: '/admin/users', title: '用户管理', icon: User },
+  { path: '/admin/audit-logs', title: '操作审计', icon: Document },
   { path: '/admin/indexes', title: '索引运维', icon: Coin },
   { path: '/admin/tasks', title: '解析任务', icon: List },
   { path: '/admin/agents', title: 'Agent 接入', icon: Connection },

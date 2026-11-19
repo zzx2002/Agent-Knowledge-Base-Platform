@@ -15,7 +15,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
         "com.agentkb.task.mapper",
         "com.agentkb.security.mapper",
         "com.agentkb.common.mapper",
-        "com.agentkb.chat.mapper"
+        "com.agentkb.chat.mapper",
+        "com.agentkb.audit.mapper",
+        "com.agentkb.admin.mapper"
 })
 public class KnowledgeApiApplication {
 
