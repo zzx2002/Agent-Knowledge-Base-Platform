@@ -97,9 +97,10 @@ export async function chatStream(
     if (!block.trim()) return
     let event = 'message'
     const dataLines: string[] = []
-    for (const line of block.split('\n')) {
-      if (line.startsWith('event:')) event = line.slice(6).trim()
-      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    for (const line of block.split(/\r?\n/)) {
+      const clean = line.endsWith('\r') ? line.slice(0, -1) : line
+      if (clean.startsWith('event:')) event = clean.slice(6).trim()
+      if (clean.startsWith('data:')) dataLines.push(clean.slice(5).trim())
     }
     const data = dataLines.join('\n')
     if (!data) return
@@ -119,7 +120,7 @@ export async function chatStream(
   while (true) {
     const { done, value } = await reader.read()
     buffer += decoder.decode(value, { stream: true })
-    const blocks = buffer.split('\n\n')
+    const blocks = buffer.split(/\r?\n\r?\n/)
     buffer = blocks.pop() || ''
     blocks.forEach(handleEvent)
     if (done) {

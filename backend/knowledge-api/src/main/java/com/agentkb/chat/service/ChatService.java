@@ -8,8 +8,6 @@ import com.agentkb.search.dto.SearchHitDTO;
 import com.agentkb.search.dto.SearchRequest;
 import com.agentkb.search.dto.SearchResponseDTO;
 import com.agentkb.search.service.SearchService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -23,14 +21,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,31 +35,29 @@ public class ChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
     private static final String SYSTEM_PROMPT =
-            "你是企业知识库助手。只能依据提供的参考资料回答问题，不要编造资料中没有的信息。"
-                    + "回答中需要使用 [1]、[2] 等编号标注引用来源。若资料不足以回答，请明确说明。"
+            "你是企业知识库助手。当提供参考资料时，只能依据资料回答，不要编造资料中没有的信息，"
+                    + "并用 [1]、[2] 等编号标注引用来源；资料不足时明确说明。"
+                    + "当没有参考资料时，可以正常介绍自己并进行通用对话，但不要编造业务事实。"
                     + "回答使用简体中文，保持简洁。";
 
     private final SearchService searchService;
     private final LlmProperties properties;
     private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
 
     public ChatService(SearchService searchService,
                        LlmProperties properties,
-                       @Qualifier("searchRestTemplate") RestTemplate restTemplate,
-                       ObjectMapper objectMapper) {
+                       @Qualifier("searchRestTemplate") RestTemplate restTemplate) {
         this.searchService = searchService;
         this.properties = properties;
         this.restTemplate = restTemplate;
-        this.objectMapper = objectMapper;
     }
 
     /** 非流式问答。 */
     @SuppressWarnings("unchecked")
     public ChatResponseDTO chat(ChatRequest request) {
-        SearchResponseDTO searchResult = retrieve(request);
-        List<ChatSourceDTO> sources = toSources(searchResult.getHits());
-        Map<String, Object> body = buildBody(request.getQuestion(), searchResult.getHits(), false);
+        List<SearchHitDTO> hits = retrieveHits(request);
+        List<ChatSourceDTO> sources = toSources(hits);
+        Map<String, Object> body = buildBody(request.getQuestion(), hits, false);
         HttpHeaders headers = llmHeaders(false);
         Map response = restTemplate.exchange(
                 properties.getBaseUrl().replaceAll("/$", "") + "/chat/completions",
@@ -81,7 +69,7 @@ public class ChatService {
         return result;
     }
 
-    /** SSE 流式问答：先逐块推送 delta，最后推送 sources。 */
+    /** SSE 流式问答：基于非流式模型结果逐块推送，最后推送 sources。 */
     public SseEmitter stream(ChatRequest request) {
         SseEmitter emitter = new SseEmitter(120000L);
         emitter.onTimeout(emitter::complete);
@@ -91,16 +79,22 @@ public class ChatService {
         CompletableFuture.runAsync(() -> {
             SecurityContextHolder.setContext(securityContext);
             try {
-                SearchResponseDTO searchResult = retrieve(request);
-                List<ChatSourceDTO> sources = toSources(searchResult.getHits());
-                Map<String, Object> body = buildBody(request.getQuestion(), searchResult.getHits(), true);
-                streamLlm(body, emitter);
-                emitter.send(SseEmitter.event().name("sources").data(sources));
+                ChatResponseDTO response = chat(request);
+                String answer = response.getAnswer() == null ? "" : response.getAnswer();
+                int size = 8;
+                for (int i = 0; i < answer.length(); i += size) {
+                    String chunk = answer.substring(i, Math.min(i + size, answer.length()))
+                            .replace("\r", " ").replace("\n", " ");
+                    emitter.send(SseEmitter.event().name("delta").data(chunk));
+                    Thread.sleep(12);
+                }
+                emitter.send(SseEmitter.event().name("sources").data(response.getSources()));
                 emitter.complete();
             } catch (Exception e) {
                 log.error("流式问答失败: {}", e.getMessage(), e);
                 try {
-                    emitter.send(SseEmitter.event().name("error").data(e.getMessage()));
+                    emitter.send(SseEmitter.event().name("error")
+                            .data(e.getMessage() == null ? "服务暂时不可用" : e.getMessage()));
                 } catch (Exception ignored) {
                     // 客户端已断开
                 }
@@ -110,13 +104,26 @@ public class ChatService {
         return emitter;
     }
 
-    private SearchResponseDTO retrieve(ChatRequest request) {
+    private List<SearchHitDTO> retrieveHits(ChatRequest request) {
+        if (isSmallTalk(request.getQuestion())) {
+            return List.of();
+        }
         SearchRequest searchRequest = new SearchRequest();
         searchRequest.setKnowledgeBaseId(request.getKnowledgeBaseId());
         searchRequest.setQuery(request.getQuestion());
         searchRequest.setTopK(request.getTopK());
         searchRequest.setRerank(true);
-        return searchService.search(searchRequest, false);
+        SearchResponseDTO result = searchService.search(searchRequest, false);
+        return result.getHits() == null ? List.of() : result.getHits();
+    }
+
+    private boolean isSmallTalk(String question) {
+        if (question == null) {
+            return false;
+        }
+        String text = question.trim().toLowerCase();
+        return text.matches("(?i)(你好|您好|嗨|哈喽|hi|hello|hey|在吗|你是谁|你叫什么|你是谁呀)[!！。？?\\s]*")
+                || text.contains("你是谁") || text.contains("你叫什么");
     }
 
     private Map<String, Object> buildBody(String question, List<SearchHitDTO> hits, boolean stream) {
@@ -130,14 +137,18 @@ public class ChatService {
             }
             context.append('\n').append(hit.getContent()).append("\n\n");
         }
-        String userPrompt = "参考资料:\n" + context
-                + (hits.isEmpty() ? "（没有检索到相关资料）\n\n" : "")
-                + "问题: " + question;
+        String userPrompt = hits.isEmpty()
+                ? "问题: " + question
+                : "参考资料:\n" + context + "问题: " + question;
+        String systemPrompt = hits.isEmpty()
+                ? "你是企业知识库助手。当前没有参考资料，可以自然问候、介绍自己或进行通用对话，"
+                        + "不要编造业务事实，也不要使用引用编号。回答使用简体中文，保持简洁。"
+                : SYSTEM_PROMPT;
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", properties.getModel());
         body.put("messages", List.of(
-                Map.of("role", "system", "content", SYSTEM_PROMPT),
+                Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", userPrompt)));
         body.put("temperature", properties.getTemperature());
         body.put("max_tokens", properties.getMaxTokens());
@@ -161,46 +172,6 @@ public class ChatService {
             return content == null ? "" : String.valueOf(content);
         }
         return "";
-    }
-
-    private void streamLlm(Map<String, Object> body, SseEmitter emitter) throws Exception {
-        String url = properties.getBaseUrl().replaceAll("/$", "") + "/chat/completions";
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(java.time.Duration.ofSeconds(5))
-                .build();
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(url))
-                .timeout(java.time.Duration.ofMinutes(2))
-                .header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream");
-        if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
-            requestBuilder.header("Authorization", "Bearer " + properties.getApiKey());
-        }
-        HttpRequest request = requestBuilder
-                .POST(HttpRequest.BodyPublishers.ofByteArray(objectMapper.writeValueAsBytes(body)))
-                .build();
-
-        HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        if (response.statusCode() >= 400) {
-            throw new IllegalStateException("模型服务返回 HTTP " + response.statusCode());
-        }
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (!line.startsWith("data:")) {
-                    continue;
-                }
-                String data = line.substring(5).trim();
-                if (data.isEmpty() || "[DONE]".equals(data)) {
-                    continue;
-                }
-                JsonNode node = objectMapper.readTree(data);
-                JsonNode delta = node.path("choices").path(0).path("delta").path("content");
-                if (!delta.isMissingNode() && !delta.isNull()) {
-                    emitter.send(SseEmitter.event().name("delta").data(delta.asText()));
-                }
-            }
-        }
     }
 
     private List<ChatSourceDTO> toSources(List<SearchHitDTO> hits) {
