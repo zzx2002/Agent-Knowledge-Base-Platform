@@ -68,6 +68,24 @@ jwt:
 kb:
   callback:
     token: ${TASK_CALLBACK_TOKEN:}
+  search:
+    es:
+      url: ${ES_URL:http://localhost:9200}
+      username: ${ES_USERNAME:elastic}
+      password: ${ES_PASSWORD:}
+      index: ${ES_INDEX:kb_chunks}
+    qdrant:
+      url: ${QDRANT_URL:http://localhost:6333}
+      api-key: ${QDRANT_API_KEY:}
+      collection: ${QDRANT_COLLECTION:kb_chunks}
+      dimension: ${EMBEDDING_DIM:1024}
+    embedding:
+      url: ${EMBEDDING_SERVICE_URL:http://localhost:8002}
+      model: ${EMBEDDING_MODEL:bge-m3}
+    rerank:
+      url: ${RERANK_SERVICE_URL:http://localhost:8003}
+      model: ${RERANKER_MODEL:bge-reranker}
+      enabled: true
 
 springdoc:
   api-docs:

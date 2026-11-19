@@ -302,7 +302,13 @@ def maybe_embed(config: WorkerConfig, document: Dict[str, Any]) -> int:
             timeout=config.request_timeout,
         )
         response.raise_for_status()
-        return len(response.json().get("embeddings", []))
+        embeddings = response.json().get("embeddings", [])
+        if len(embeddings) != len(texts):
+            logger.warning("Embedding 返回数量 %s 与分块数量 %s 不一致", len(embeddings), len(texts))
+            return 0
+        for chunk, vector in zip(document.get("chunks", []), embeddings):
+            chunk["embedding"] = vector
+        return len(embeddings)
     except Exception as exc:
         logger.warning("Embedding 调用失败（忽略）: %s", exc)
         return 0

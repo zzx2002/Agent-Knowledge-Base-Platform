@@ -51,10 +51,26 @@ services:
       JWT_ISSUER: ${JWT_ISSUER}
       TASK_CALLBACK_TOKEN: ${TASK_CALLBACK_TOKEN}
       PARSER_CALLBACK_URL: http://kb-api:8080/api/v1
+      ES_URL: http://elasticsearch:9200
+      ES_USERNAME: elastic
+      ES_PASSWORD: ${ES_PASSWORD}
+      ES_INDEX: kb_chunks
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: kb_chunks
+      EMBEDDING_SERVICE_URL: http://kb-embedding:8002
+      RERANK_SERVICE_URL: http://kb-reranker:8003
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      RERANKER_MODEL: ${RERANKER_MODEL}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+      qdrant: { condition: service_started }
+      kb-embedding: { condition: service_started }
+      kb-reranker: { condition: service_started }
     restart: unless-stopped
     networks: [kb-net]
 
@@ -153,6 +169,7 @@ services:
       - ./backend/knowledge-api/src/main/resources/db/migration/V2__add_logical_delete.sql:/docker-entrypoint-initdb.d/03-V2__add_logical_delete.sql:ro
       - ./backend/knowledge-api/src/main/resources/db/migration/V3__add_parse_result_fields.sql:/docker-entrypoint-initdb.d/04-V3__add_parse_result_fields.sql:ro
       - ./backend/knowledge-api/src/main/resources/db/migration/V4__add_task_error_code.sql:/docker-entrypoint-initdb.d/05-V4__add_task_error_code.sql:ro
+      - ./backend/knowledge-api/src/main/resources/db/migration/V5__add_chunk_index_fields.sql:/docker-entrypoint-initdb.d/06-V5__add_chunk_index_fields.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s

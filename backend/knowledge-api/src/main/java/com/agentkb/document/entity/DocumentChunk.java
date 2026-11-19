@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 文档分块，对应 kb_chunk 表。
@@ -67,6 +68,22 @@ public class DocumentChunk {
 
     private Boolean indexed;
 
+    @TableField("es_id")
+    private String esId;
+
+    @TableField("qdrant_point_id")
+    private String qdrantPointId;
+
+    @TableField("indexed_at")
+    private LocalDateTime indexedAt;
+
+    @TableField("index_error")
+    private String indexError;
+
+    /** Worker 已计算好的向量，不落库，仅用于索引写入。 */
+    @TableField(exist = false)
+    private List<Double> embedding;
+
     @TableField("created_at")
     private LocalDateTime createdAt;
 
@@ -112,6 +129,16 @@ public class DocumentChunk {
     public void setEmbeddingModel(String embeddingModel) { this.embeddingModel = embeddingModel; }
     public Boolean getIndexed() { return indexed; }
     public void setIndexed(Boolean indexed) { this.indexed = indexed; }
+    public String getEsId() { return esId; }
+    public void setEsId(String esId) { this.esId = esId; }
+    public String getQdrantPointId() { return qdrantPointId; }
+    public void setQdrantPointId(String qdrantPointId) { this.qdrantPointId = qdrantPointId; }
+    public LocalDateTime getIndexedAt() { return indexedAt; }
+    public void setIndexedAt(LocalDateTime indexedAt) { this.indexedAt = indexedAt; }
+    public String getIndexError() { return indexError; }
+    public void setIndexError(String indexError) { this.indexError = indexError; }
+    public List<Double> getEmbedding() { return embedding; }
+    public void setEmbedding(List<Double> embedding) { this.embedding = embedding; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

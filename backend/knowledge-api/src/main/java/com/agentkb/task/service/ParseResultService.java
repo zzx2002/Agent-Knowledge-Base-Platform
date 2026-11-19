@@ -7,6 +7,7 @@ import com.agentkb.document.entity.DocumentElement;
 import com.agentkb.document.mapper.DocumentChunkMapper;
 import com.agentkb.document.mapper.DocumentElementMapper;
 import com.agentkb.document.mapper.DocumentMapper;
+import com.agentkb.search.service.IndexingService;
 import com.agentkb.storage.MinioStorageService;
 import com.agentkb.task.entity.ParseTask;
 import com.agentkb.task.mapper.ParseTaskMapper;
@@ -19,6 +20,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -35,19 +38,22 @@ public class ParseResultService {
     private final DocumentChunkMapper chunkMapper;
     private final MinioStorageService minioStorageService;
     private final ObjectMapper objectMapper;
+    private final IndexingService indexingService;
 
     public ParseResultService(ParseTaskMapper taskMapper,
                               DocumentMapper documentMapper,
                               DocumentElementMapper elementMapper,
                               DocumentChunkMapper chunkMapper,
                               MinioStorageService minioStorageService,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper,
+                              IndexingService indexingService) {
         this.taskMapper = taskMapper;
         this.documentMapper = documentMapper;
         this.elementMapper = elementMapper;
         this.chunkMapper = chunkMapper;
         this.minioStorageService = minioStorageService;
         this.objectMapper = objectMapper;
+        this.indexingService = indexingService;
     }
 
     /** 处理 Worker 回调；仅 COMPLETED 时下载并落库解析结果。 */
@@ -154,15 +160,23 @@ public class ParseResultService {
         }
 
         int chunkCount = 0;
-        JsonNode chunks = documentNode.path("chunks");
-        if (chunks.isArray()) {
-            for (JsonNode node : chunks) {
-                chunkMapper.insert(toChunk(node, document, task, version));
+        List<DocumentChunk> indexedChunks = new ArrayList<>();
+        JsonNode chunkNodes = documentNode.path("chunks");
+        if (chunkNodes.isArray()) {
+            for (JsonNode node : chunkNodes) {
+                DocumentChunk chunk = toChunk(node, document, task, version);
+                chunkMapper.insert(chunk);
+                indexedChunks.add(chunk);
                 chunkCount++;
             }
         }
         log.info("解析结果已落库: taskId={}, documentId={}, elements={}, chunks={}",
                 task.getId(), task.getDocumentId(), elementCount, chunkCount);
+        try {
+            indexingService.index(indexedChunks);
+        } catch (Exception e) {
+            log.warn("索引阶段失败（不阻断解析任务）: taskId={}, error={}", task.getId(), e.getMessage());
+        }
     }
 
     private DocumentElement toElement(JsonNode node, Document document, ParseTask task, long version) {
@@ -211,6 +225,7 @@ public class ParseResultService {
         chunk.setPageStart(intOrNull(firstNotNull(node.get("page_start"), node.get("page"))));
         chunk.setPageEnd(intOrNull(firstNotNull(node.get("page_end"), node.get("page"))));
         chunk.setMetadata(jsonOrNull(node.get("metadata")));
+        chunk.setEmbedding(doubleListOrNull(node.get("embedding")));
         chunk.setIndexed(false);
         chunk.setCreatedAt(LocalDateTime.now());
         chunk.setUpdatedAt(LocalDateTime.now());
@@ -231,6 +246,17 @@ public class ParseResultService {
 
     private Integer intOrNull(JsonNode node) {
         return node == null || node.isNull() ? null : node.asInt();
+    }
+
+    private List<Double> doubleListOrNull(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return null;
+        }
+        List<Double> values = new ArrayList<>();
+        for (JsonNode item : node) {
+            values.add(item.asDouble());
+        }
+        return values;
     }
 
     private JsonNode firstNotNull(JsonNode a, JsonNode b) {
