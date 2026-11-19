@@ -47,4 +47,4 @@ python -m compileall -q parser ai
 1. 先读 `Agent Knowledge Base Platform.md` 对应章节再动手。
 2. 保持模块边界，不让 MCP 直连数据库、不让解析器耦合 RAG。
 3. 修改数据库结构时同步更新 `backend/knowledge-api/src/main/resources/db/migration/`。
-4. 修改接口时同步更新 `docs/API.md` 或 `docs/MCP.md`。
+4. 修改接口时同步更新 `docs/接口文档.md` 或 `docs/MCP接入文档.md`。

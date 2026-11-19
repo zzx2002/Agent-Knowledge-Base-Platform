@@ -6,12 +6,12 @@
 
 ## 开发文档
 
-- [REST API](./docs/API.md)
-- [数据库设计](./docs/DATABASE.md)
-- [MCP 工具说明](./docs/MCP.md)
-- [部署说明](./docs/DEPLOYMENT.md)
-- [开发环境](./docs/DEVELOPMENT.md)
-- [文档解析模块开发设计](./docs/DOCUMENT_PARSING_DESIGN.md)
+- [REST API](./docs/接口文档.md)
+- [数据库设计](./docs/数据库文档.md)
+- [MCP 工具说明](./docs/MCP接入文档.md)
+- [部署说明](./docs/部署文档.md)
+- [开发环境](./docs/开发文档.md)
+- [文档解析模块开发设计](./docs/文档解析设计文档.md)
 
 ## 技术栈
 
