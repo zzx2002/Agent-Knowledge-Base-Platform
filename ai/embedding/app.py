@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
 import random
@@ -26,6 +27,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="KB Embedding Service", version="0.1.0")
+logger = logging.getLogger("kb.embedding")
 
 
 class EmbedRequest(BaseModel):
@@ -133,6 +135,9 @@ def get_model(model_name: Optional[str] = None) -> EmbeddingModel:
     name = model_name or os.environ.get("EMBEDDING_MODEL", "bge-m3")
     backend = os.environ.get("EMBEDDING_BACKEND", "local").lower()
     if backend in ("openai", "compatible"):
+        if not os.environ.get("OPENAI_API_KEY", "").strip():
+            logger.warning("OPENAI_API_KEY 未配置，Embedding 回退到本地占位向量")
+            return LocalHashEmbeddingModel(name, int(os.environ.get("EMBEDDING_DIM", "1024")))
         return OpenAICompatibleEmbeddingModel(name)
     return LocalHashEmbeddingModel(name, int(os.environ.get("EMBEDDING_DIM", "1024")))
 

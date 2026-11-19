@@ -13,15 +13,20 @@
 
 from __future__ import annotations
 
+import logging
+import math
 import os
 import re
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="KB Reranker Service", version="0.1.0")
+logger = logging.getLogger("kb.reranker")
+_MODEL_CACHE: dict = {}
 
 _TOKEN_RE = re.compile(r"[\u4e00-\u9fff]|[A-Za-z0-9_]+")
 
@@ -95,6 +100,49 @@ class LocalKeywordReranker(Reranker):
         return results[:top_k] if top_k else results
 
 
+class LocalCrossEncoderReranker(Reranker):
+    """本地真实模型：sentence-transformers CrossEncoder。"""
+
+    def __init__(self, model_name: str) -> None:
+        self._name = model_name
+        model_dir = Path(os.environ.get("RERANKER_MODEL_DIR", "/app/models/bge-reranker-base"))
+        cache_key = f"{model_name}|{model_dir}"
+        model = _MODEL_CACHE.get(cache_key)
+        if model is None:
+            if not (model_dir / "config.json").exists():
+                logger.info("从 ModelScope 下载 Reranker 模型: %s", model_name)
+                from modelscope import snapshot_download
+
+                model_dir.mkdir(parents=True, exist_ok=True)
+                snapshot_download(model_name, local_dir=str(model_dir))
+            from sentence_transformers import CrossEncoder
+
+            max_length = int(os.environ.get("RERANKER_MAX_LENGTH", "512"))
+            model = CrossEncoder(str(model_dir), max_length=max_length)
+            _MODEL_CACHE[cache_key] = model
+        self._model = model
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def rerank(
+        self, query: str, documents: List[str], top_k: Optional[int] = None
+    ) -> List[RerankResult]:
+        pairs = [(query, document) for document in documents]
+        raw_scores = self._model.predict(
+            pairs,
+            batch_size=int(os.environ.get("RERANKER_BATCH_SIZE", "16")),
+            show_progress_bar=False,
+        )
+        results: List[RerankResult] = []
+        for index, (document, raw) in enumerate(zip(documents, raw_scores)):
+            score = 1.0 / (1.0 + math.exp(-float(raw)))
+            results.append(RerankResult(index=index, score=round(score, 6), document=document))
+        results.sort(key=lambda item: item.score, reverse=True)
+        return results[:top_k] if top_k else results
+
+
 class OpenAICompatibleReranker(Reranker):
     """OpenAI 兼容 /rerank 接口占位实现。"""
 
@@ -146,13 +194,25 @@ def get_reranker(model_name: Optional[str] = None) -> Reranker:
     name = model_name or os.environ.get("RERANKER_MODEL", "bge-reranker")
     backend = os.environ.get("RERANKER_BACKEND", "local").lower()
     if backend in ("openai", "compatible"):
+        if not os.environ.get("OPENAI_API_KEY", "").strip():
+            logger.warning("OPENAI_API_KEY 未配置，Reranker 回退关键词占位实现")
+            return LocalKeywordReranker(name)
         return OpenAICompatibleReranker(name)
-    return LocalKeywordReranker(name)
+    try:
+        return LocalCrossEncoderReranker(name)
+    except Exception as exc:
+        logger.warning("本地 Reranker 模型不可用，回退关键词占位实现: %s", exc)
+        return LocalKeywordReranker(name)
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "reranker", "backend": os.environ.get("RERANKER_BACKEND", "local")}
+    return {
+        "status": "ok",
+        "service": "reranker",
+        "backend": os.environ.get("RERANKER_BACKEND", "local"),
+        "model_loaded": bool(_MODEL_CACHE),
+    }
 
 
 @app.post("/rerank", response_model=RerankResponse)
@@ -169,7 +229,7 @@ def rerank(request: RerankRequest) -> RerankResponse:
         model=model.name,
         backend=backend,
         results=results,
-        placeholder=backend in ("local", ""),
+        placeholder=isinstance(model, LocalKeywordReranker),
     )
 
 

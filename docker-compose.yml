@@ -138,7 +138,12 @@ services:
     container_name: kb-embedding
     expose: ["8002"]
     environment:
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-BAAI/bge-m3}
     restart: unless-stopped
     networks: [kb-net]
 
@@ -150,7 +155,12 @@ services:
     container_name: kb-reranker
     expose: ["8003"]
     environment:
+      RERANKER_BACKEND: ${RERANKER_BACKEND:-openai}
       RERANKER_MODEL: ${RERANKER_MODEL}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_RERANK_MODEL: ${OPENAI_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      RERANKER_MODEL_DIR: ${RERANKER_MODEL_DIR:-/app/models/bge-reranker-base}
     restart: unless-stopped
     networks: [kb-net]
 
