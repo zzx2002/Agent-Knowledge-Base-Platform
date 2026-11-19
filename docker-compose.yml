@@ -145,6 +145,7 @@ services:
       - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./backend/knowledge-api/src/main/resources/db/migration/V1__init.sql:/docker-entrypoint-initdb.d/02-V1__init.sql:ro
       - ./backend/knowledge-api/src/main/resources/db/migration/V2__add_logical_delete.sql:/docker-entrypoint-initdb.d/03-V2__add_logical_delete.sql:ro
+      - ./backend/knowledge-api/src/main/resources/db/migration/V3__add_parse_result_fields.sql:/docker-entrypoint-initdb.d/04-V3__add_parse_result_fields.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s

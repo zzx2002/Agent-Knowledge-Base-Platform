@@ -5,10 +5,10 @@ import com.agentkb.common.PageResult;
 import com.agentkb.common.R;
 import com.agentkb.security.KbAccessService;
 import com.agentkb.task.entity.ParseTask;
+import com.agentkb.task.service.ParseResultService;
 import com.agentkb.task.service.ParseTaskService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.time.LocalDateTime;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,13 +29,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class TaskController {
 
     private final ParseTaskService parseTaskService;
+    private final ParseResultService parseResultService;
     private final KbAccessService accessService;
 
     @Value("${kb.callback.token:}")
     private String callbackToken;
 
-    public TaskController(ParseTaskService parseTaskService, KbAccessService accessService) {
+    public TaskController(ParseTaskService parseTaskService,
+                          ParseResultService parseResultService,
+                          KbAccessService accessService) {
         this.parseTaskService = parseTaskService;
+        this.parseResultService = parseResultService;
         this.accessService = accessService;
     }
 
@@ -91,30 +95,7 @@ public class TaskController {
                 && !("Bearer " + callbackToken).equals(authorization)) {
             throw BusinessException.unauthorized("回调令牌无效");
         }
-        ParseTask task = parseTaskService.getById(id);
-        if (task == null) {
-            throw BusinessException.notFound("解析任务不存在");
-        }
-        Object status = payload.get("status");
-        if (status != null) {
-            task.setStatus(String.valueOf(status));
-        }
-        Object progress = payload.get("progress");
-        if (progress instanceof Number number) {
-            task.setProgress(number.intValue());
-        }
-        Object message = payload.get("message");
-        if (message != null) {
-            task.setErrorMessage(String.valueOf(message));
-        }
-        if ("PROCESSING".equals(task.getStatus()) && task.getStartedAt() == null) {
-            task.setStartedAt(LocalDateTime.now());
-        }
-        if ("COMPLETED".equals(task.getStatus()) || "FAILED".equals(task.getStatus())
-                || "CANCELLED".equals(task.getStatus())) {
-            task.setFinishedAt(LocalDateTime.now());
-        }
-        parseTaskService.updateById(task);
+        parseResultService.handleCallback(id, payload);
         return R.ok();
     }
 }

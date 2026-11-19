@@ -20,10 +20,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文档接口：/api/v1/documents/*
- * /content 与 /chunks 属于第二、三阶段能力，当前返回 501。
  */
 @Tag(name = "文档管理")
 @RestController
@@ -82,11 +82,10 @@ public class DocumentController {
         return R.ok(documentService.detail(id));
     }
 
-    @Operation(summary = "获取文档内容（第二阶段实现）")
+    @Operation(summary = "获取文档解析内容")
     @GetMapping("/{id}/content")
-    public R<Void> content(@PathVariable Long id) {
-        documentService.detail(id);
-        throw BusinessException.notImplemented("文档内容解析预览将在第二阶段（Parser）实现");
+    public R<Map<String, Object>> content(@PathVariable Long id) {
+        return R.ok(documentService.content(id));
     }
 
     @Operation(summary = "删除文档")
@@ -102,10 +101,18 @@ public class DocumentController {
         return R.ok(documentService.reparse(id));
     }
 
-    @Operation(summary = "获取分块（第三阶段实现）")
+    @Operation(summary = "获取文档分块（分页）")
     @GetMapping("/{id}/chunks")
-    public R<Void> chunks(@PathVariable Long id) {
-        documentService.detail(id);
-        throw BusinessException.notImplemented("文档分块预览将在第三阶段（分块与向量化）实现");
+    public R<PageResult<Map<String, Object>>> chunks(
+            @PathVariable Long id,
+            @RequestParam(required = false) String chunk_type,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "20") long size,
+            @RequestParam(required = false) Long page_no,
+            @RequestParam(required = false) Long page_size) {
+        long finalCurrent = page_no != null ? page_no : current;
+        long finalSize = page_size != null ? page_size : size;
+        return R.ok(documentService.chunks(id, chunk_type, page, finalCurrent, finalSize));
     }
 }

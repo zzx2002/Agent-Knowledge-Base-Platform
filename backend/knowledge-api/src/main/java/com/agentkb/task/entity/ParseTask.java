@@ -1,5 +1,6 @@
 package com.agentkb.task.entity;
 
+import com.agentkb.common.JsonbStringTypeHandler;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -30,6 +31,12 @@ public class ParseTask {
 
     @TableField("error_message")
     private String errorMessage;
+
+    @TableField("result_key")
+    private String resultKey;
+
+    @TableField(value = "result_summary", typeHandler = JsonbStringTypeHandler.class)
+    private String resultSummary;
 
     @TableField("retry_count")
     private Integer retryCount;
@@ -96,6 +103,11 @@ public class ParseTask {
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
     }
+
+    public String getResultKey() { return resultKey; }
+    public void setResultKey(String resultKey) { this.resultKey = resultKey; }
+    public String getResultSummary() { return resultSummary; }
+    public void setResultSummary(String resultSummary) { this.resultSummary = resultSummary; }
 
     public Integer getRetryCount() {
         return retryCount;

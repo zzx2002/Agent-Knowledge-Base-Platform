@@ -6,6 +6,8 @@ import com.agentkb.document.entity.Document;
 import com.baomidou.mybatisplus.extension.service.IService;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Map;
+
 /**
  * 文档服务接口。
  */
@@ -16,6 +18,10 @@ public interface DocumentService extends IService<Document> {
     PageResult<DocumentDTO> page(Long kbId, String keyword, long current, long size);
 
     DocumentDTO detail(Long id);
+
+    Map<String, Object> content(Long id);
+
+    PageResult<Map<String, Object>> chunks(Long id, String chunkType, Integer page, long current, long size);
 
     void delete(Long id);
 

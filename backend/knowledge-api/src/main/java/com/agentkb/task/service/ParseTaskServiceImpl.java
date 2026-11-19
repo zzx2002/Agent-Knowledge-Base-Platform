@@ -2,6 +2,8 @@ package com.agentkb.task.service;
 
 import com.agentkb.common.BusinessException;
 import com.agentkb.common.PageResult;
+import com.agentkb.document.entity.Document;
+import com.agentkb.document.mapper.DocumentMapper;
 import com.agentkb.security.KbAccessService;
 import com.agentkb.task.entity.ParseTask;
 import com.agentkb.task.mapper.ParseTaskMapper;
@@ -27,10 +29,14 @@ public class ParseTaskServiceImpl extends ServiceImpl<ParseTaskMapper, ParseTask
 
     private final ParseTaskProducer parseTaskProducer;
     private final KbAccessService accessService;
+    private final DocumentMapper documentMapper;
 
-    public ParseTaskServiceImpl(ParseTaskProducer parseTaskProducer, KbAccessService accessService) {
+    public ParseTaskServiceImpl(ParseTaskProducer parseTaskProducer,
+                                KbAccessService accessService,
+                                DocumentMapper documentMapper) {
         this.parseTaskProducer = parseTaskProducer;
         this.accessService = accessService;
+        this.documentMapper = documentMapper;
     }
 
     @Override
@@ -82,14 +88,22 @@ public class ParseTaskServiceImpl extends ServiceImpl<ParseTaskMapper, ParseTask
         task.setStatus("PENDING");
         task.setProgress(0);
         task.setErrorMessage(null);
-        task.setRetryCount(task.getRetryCount() == null ? 1 : task.getRetryCount() + 1);
+        int attempt = task.getRetryCount() == null ? 1 : task.getRetryCount() + 1;
+        task.setRetryCount(attempt);
         task.setFinishedAt(null);
         updateById(task);
 
+        Document document = documentMapper.selectById(task.getDocumentId());
         ParseTaskMessage message = new ParseTaskMessage();
         message.setTaskId(task.getId());
         message.setDocumentId(task.getDocumentId());
         message.setKnowledgeBaseId(task.getKbId());
+        message.setAttempt(attempt);
+        if (document != null) {
+            message.setStorageKey(document.getStorageKey());
+            message.setFileName(document.getFileName());
+            message.setFileType(document.getFileType());
+        }
         parseTaskProducer.send(message);
         return task;
     }

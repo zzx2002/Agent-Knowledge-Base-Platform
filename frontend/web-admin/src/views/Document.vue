@@ -9,7 +9,10 @@ import {
   reparseDocument,
   deleteDocument,
   getDocumentContent,
+  getDocumentChunks,
   type DocumentItem,
+  type DocumentElementItem,
+  type DocumentChunkItem,
 } from '@/api/document'
 import { useKbStore } from '@/stores/kb'
 
@@ -24,6 +27,10 @@ const pageSize = ref(10)
 const contentVisible = ref(false)
 const contentTitle = ref('')
 const content = ref('')
+const elements = ref<DocumentElementItem[]>([])
+const chunks = ref<DocumentChunkItem[]>([])
+const previewTab = ref('content')
+const chunkTotal = ref(0)
 
 async function loadData() {
   if (!kbStore.currentKbId) await kbStore.fetchKnowledgeBases()
@@ -73,7 +80,17 @@ async function preview(row: DocumentItem) {
   const data = (res as any).data ?? res
   contentTitle.value = `解析结果 - ${row.file_name}`
   content.value = data.content || '暂无内容'
+  elements.value = data.elements || []
+  previewTab.value = 'content'
   contentVisible.value = true
+  await loadChunks(row.id)
+}
+
+async function loadChunks(id: string) {
+  const res = await getDocumentChunks(id, { page_no: 1, page_size: 200 })
+  const data = (res as any).data ?? res
+  chunks.value = data.records || []
+  chunkTotal.value = data.total || 0
 }
 
 function download(row: DocumentItem) {
@@ -164,8 +181,30 @@ onMounted(loadData)
       </div>
     </el-card>
 
-    <el-dialog v-model="contentVisible" :title="contentTitle" width="700px">
-      <pre class="content-box">{{ content }}</pre>
+    <el-dialog v-model="contentVisible" :title="contentTitle" width="820px">
+      <el-tabs v-model="previewTab">
+        <el-tab-pane label="全文" name="content">
+          <pre class="content-box">{{ content }}</pre>
+        </el-tab-pane>
+        <el-tab-pane :label="`元素 (${elements.length})`" name="elements">
+          <el-table :data="elements" border size="small" max-height="55vh">
+            <el-table-column prop="type" label="类型" width="100" />
+            <el-table-column prop="level" label="层级" width="70" />
+            <el-table-column prop="page" label="页码" width="70" />
+            <el-table-column prop="heading_path" label="标题路径" width="180" show-overflow-tooltip />
+            <el-table-column prop="content" label="内容" min-width="260" show-overflow-tooltip />
+          </el-table>
+        </el-tab-pane>
+        <el-tab-pane :label="`分块 (${chunkTotal})`" name="chunks">
+          <div v-for="chunk in chunks" :key="chunk.chunk_index" class="chunk-card">
+            <div class="chunk-meta">
+              #{{ chunk.chunk_index }} · {{ chunk.chunk_type }} · {{ chunk.token_count || 0 }} Token
+              <span v-if="chunk.page_start"> · P{{ chunk.page_start }}-{{ chunk.page_end }}</span>
+            </div>
+            <div class="chunk-content">{{ chunk.content }}</div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-dialog>
   </div>
 </template>
@@ -191,5 +230,24 @@ onMounted(loadData)
   word-break: break-all;
   font-size: 13px;
   line-height: 1.6;
+}
+.chunk-card {
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.chunk-meta {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+}
+.chunk-content {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow: auto;
 }
 </style>

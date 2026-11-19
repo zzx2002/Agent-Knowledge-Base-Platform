@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -33,6 +34,8 @@ logger = logging.getLogger("kb.parser.worker")
 class WorkerConfig:
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     queue_name: str = "document.parse"
+    parse_exchange: str = "kb.parse.exchange"
+    parse_routing_key: str = "kb.parse.created"
     prefetch_count: int = 1
 
     api_base_url: str = "http://localhost:8080/api/v1"
@@ -48,6 +51,7 @@ class WorkerConfig:
     minio_access_key: str = ""
     minio_secret_key: str = ""
     minio_bucket: str = "knowledge-files"
+    result_path_prefix: str = "parse-results"
 
     embedding_url: str = ""
     embedding_model: str = "bge-m3"
@@ -57,6 +61,8 @@ class WorkerConfig:
         return cls(
             rabbitmq_url=os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
             queue_name=os.environ.get("PARSE_QUEUE", "document.parse"),
+            parse_exchange=os.environ.get("PARSE_EXCHANGE", "kb.parse.exchange"),
+            parse_routing_key=os.environ.get("PARSE_ROUTING_KEY", "kb.parse.created"),
             prefetch_count=int(os.environ.get("PREFETCH_COUNT", "1")),
             api_base_url=os.environ.get("KNOWLEDGE_API_BASE_URL", "http://localhost:8080/api/v1").rstrip("/"),
             callback_path=os.environ.get("TASK_CALLBACK_PATH", "/tasks/{task_id}/callback"),
@@ -69,6 +75,7 @@ class WorkerConfig:
             minio_access_key=os.environ.get("MINIO_ACCESS_KEY", ""),
             minio_secret_key=os.environ.get("MINIO_SECRET_KEY", ""),
             minio_bucket=os.environ.get("MINIO_BUCKET", "knowledge-files"),
+            result_path_prefix=os.environ.get("PARSE_RESULT_PREFIX", "parse-results"),
             embedding_url=os.environ.get("EMBEDDING_SERVICE_URL", "").rstrip("/"),
             embedding_model=os.environ.get("EMBEDDING_MODEL", "bge-m3"),
         )
@@ -120,6 +127,8 @@ def report_status(
     progress: int = 0,
     message: str = "",
     result: Optional[Dict[str, Any]] = None,
+    result_key: Optional[str] = None,
+    result_summary: Optional[Dict[str, Any]] = None,
 ) -> None:
     payload: Dict[str, Any] = {
         "task_id": task_id,
@@ -132,6 +141,10 @@ def report_status(
         payload["document_id"] = document_id
     if result is not None:
         payload["result"] = result
+    if result_key:
+        payload["result_key"] = result_key
+    if result_summary is not None:
+        payload["result_summary"] = result_summary
     if not call_knowledge_api(config, task_id, payload):
         logger.error("任务 %s 状态 %s 回调失败", task_id, status)
 
@@ -224,10 +237,45 @@ def maybe_embed(config: WorkerConfig, document: Dict[str, Any]) -> int:
         return 0
 
 
+def build_minio_client(config: WorkerConfig):
+    """构造 MinIO 客户端。"""
+    from urllib.parse import urlparse
+
+    from minio import Minio
+
+    endpoint = urlparse(config.minio_endpoint).netloc or config.minio_endpoint
+    secure = urlparse(config.minio_endpoint).scheme == "https"
+    return Minio(
+        endpoint,
+        access_key=config.minio_access_key,
+        secret_key=config.minio_secret_key,
+        secure=secure,
+    )
+
+
+def upload_parse_result(config: WorkerConfig, task: Dict[str, Any], result: Dict[str, Any]) -> str:
+    """把完整解析结果写入 MinIO，返回对象键。"""
+    task_id = task.get("task_id", "unknown")
+    attempt = task.get("attempt") or (int(task.get("retry_count", 0)) + 1)
+    key = f"{config.result_path_prefix}/{task_id}/{attempt}.json"
+    data = json.dumps(result, ensure_ascii=False).encode("utf-8")
+    client = build_minio_client(config)
+    client.put_object(
+        config.minio_bucket,
+        key,
+        io.BytesIO(data),
+        len(data),
+        content_type="application/json",
+    )
+    logger.info("解析结果已写入 MinIO: %s", key)
+    return key
+
+
 def process_task(config: WorkerConfig, task: Dict[str, Any], router: ParserRouter) -> Dict[str, Any]:
     """执行单个解析任务，返回回调用的 result。"""
     task_id = str(task.get("task_id", "unknown"))
     document_id = task.get("document_id")
+    started_at = time.time()
 
     report_status(config, task_id, "PROCESSING", document_id=document_id, progress=10)
 
@@ -248,19 +296,43 @@ def process_task(config: WorkerConfig, task: Dict[str, Any], router: ParserRoute
     report_status(config, task_id, "PROCESSING", document_id=document_id, progress=80)
 
     embedded = maybe_embed(config, document)
-    return {
-        "document_id": document["document_id"],
-        "file_type": document["file_type"],
-        "element_count": len(document.get("elements", [])),
-        "chunk_count": len(document.get("chunks", [])),
+    elements = document.get("elements", [])
+    chunks = document.get("chunks", [])
+    stats = {
+        "element_count": len(elements),
+        "chunk_count": len(chunks),
         "embedded_chunk_count": embedded,
-        "document": document,
+        "elapsed_ms": int((time.time() - started_at) * 1000),
+        "warnings": document.get("warnings", []),
+    }
+    return {
+        "schema_version": "1.0",
+        "task_id": task_id,
+        "document_id": document_id,
+        "file_name": document.get("file_name", task.get("file_name", "")),
+        "file_type": document.get("file_type", task.get("file_type", "")),
+        "parser_version": "worker-1.0",
+        "elements": elements,
+        "chunks": chunks,
+        "stats": stats,
     }
 
 
 # ----------------------------------------------------------------------
 # RabbitMQ 消费
 # ----------------------------------------------------------------------
+def republish_task(channel, config: WorkerConfig, task: Dict[str, Any]) -> None:
+    """按递增 attempt 重新投递任务，避免原消息无限 requeue。"""
+    import pika
+
+    channel.basic_publish(
+        exchange=config.parse_exchange,
+        routing_key=config.parse_routing_key,
+        body=json.dumps(task, ensure_ascii=False).encode("utf-8"),
+        properties=pika.BasicProperties(delivery_mode=2),
+    )
+
+
 def on_message(config: WorkerConfig, router: ParserRouter, channel, method, properties, body) -> None:
     task: Optional[Dict[str, Any]] = None
     try:
@@ -273,18 +345,23 @@ def on_message(config: WorkerConfig, router: ParserRouter, channel, method, prop
     task_id = str(task.get("task_id", "unknown"))
     try:
         result = process_task(config, task, router)
+        result_key = upload_parse_result(config, task, result)
         report_status(
             config, task_id, "COMPLETED",
             document_id=result["document_id"], progress=100,
-            message="解析完成", result=result,
+            message="解析完成", result_key=result_key,
+            result_summary=result["stats"],
         )
         channel.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as exc:
         logger.exception("任务 %s 处理失败: %s", task_id, exc)
         retry_count = int(task.get("retry_count", 0)) + 1
         task["retry_count"] = retry_count
+        task["attempt"] = int(task.get("attempt", 1)) + 1
         if retry_count < config.max_retry:
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            logger.warning("任务 %s 处理失败，准备第 %s 次重试: %s", task_id, retry_count, exc)
+            republish_task(channel, config, task)
+            channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
             report_status(
                 config, task_id, "FAILED",

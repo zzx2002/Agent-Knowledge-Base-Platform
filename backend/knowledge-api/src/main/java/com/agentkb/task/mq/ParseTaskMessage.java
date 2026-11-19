@@ -2,6 +2,7 @@ package com.agentkb.task.mq;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.io.Serializable;
+import java.util.Map;
 
 /**
  * 解析任务消息体，Java API 投递给 Python Parser Worker。
@@ -27,6 +28,11 @@ public class ParseTaskMessage implements Serializable {
 
     @JsonProperty("file_type")
     private String fileType;
+
+    private Integer attempt = 1;
+
+    @JsonProperty("chunk_config")
+    private Map<String, Object> chunkConfig;
 
     public ParseTaskMessage() {
     }
@@ -78,6 +84,11 @@ public class ParseTaskMessage implements Serializable {
     public void setFileType(String fileType) {
         this.fileType = fileType;
     }
+
+    public Integer getAttempt() { return attempt; }
+    public void setAttempt(Integer attempt) { this.attempt = attempt; }
+    public Map<String, Object> getChunkConfig() { return chunkConfig; }
+    public void setChunkConfig(Map<String, Object> chunkConfig) { this.chunkConfig = chunkConfig; }
 
     @Override
     public String toString() {

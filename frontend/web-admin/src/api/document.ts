@@ -37,14 +37,42 @@ export function getDocument(id: string) {
   return request.get<ApiResult<DocumentItem>>(`/documents/${id}`)
 }
 
+export interface DocumentElementItem {
+  element_id: string
+  type: string
+  content: string
+  level?: number
+  page?: number
+  heading_path?: string
+  table_data?: string
+}
+
+export interface DocumentChunkItem {
+  chunk_index: number
+  chunk_type: string
+  content: string
+  token_count?: number
+  heading_path?: string
+  page_start?: number
+  page_end?: number
+}
+
+export interface DocumentContent {
+  document_id: string
+  version: number
+  status: string
+  content: string
+  elements: DocumentElementItem[]
+}
+
 /** 获取文档内容 GET /documents/{id}/content */
 export function getDocumentContent(id: string) {
-  return request.get<ApiResult<{ content: string }>>(`/documents/${id}/content`)
+  return request.get<ApiResult<DocumentContent>>(`/documents/${id}/content`)
 }
 
 /** 获取分块 GET /documents/{id}/chunks */
-export function getDocumentChunks(id: string) {
-  return request.get<ApiResult<unknown[]>>(`/documents/${id}/chunks`)
+export function getDocumentChunks(id: string, params?: { page_no?: number; page_size?: number }) {
+  return request.get<ApiResult<PageResult<DocumentChunkItem>>>(`/documents/${id}/chunks`, { params })
 }
 
 /** 重新解析 POST /documents/{id}/reparse */

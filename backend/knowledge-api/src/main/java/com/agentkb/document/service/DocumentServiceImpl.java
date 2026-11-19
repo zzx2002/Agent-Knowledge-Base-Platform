@@ -5,6 +5,10 @@ import com.agentkb.common.PageResult;
 import com.agentkb.common.mapper.LogicalDeleteMapper;
 import com.agentkb.document.dto.DocumentDTO;
 import com.agentkb.document.entity.Document;
+import com.agentkb.document.entity.DocumentChunk;
+import com.agentkb.document.entity.DocumentElement;
+import com.agentkb.document.mapper.DocumentChunkMapper;
+import com.agentkb.document.mapper.DocumentElementMapper;
 import com.agentkb.document.mapper.DocumentMapper;
 import com.agentkb.knowledge.service.KnowledgeBaseService;
 import com.agentkb.storage.MinioStorageService;
@@ -23,7 +27,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -39,6 +46,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
     private final ParseTaskProducer parseTaskProducer;
     private final KbAccessService accessService;
     private final LogicalDeleteMapper logicalDeleteMapper;
+    private final DocumentElementMapper elementMapper;
+    private final DocumentChunkMapper chunkMapper;
 
     @Value("${minio.bucket}")
     private String bucket;
@@ -48,13 +57,17 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
                                ParseTaskService parseTaskService,
                                ParseTaskProducer parseTaskProducer,
                                KbAccessService accessService,
-                               LogicalDeleteMapper logicalDeleteMapper) {
+                               LogicalDeleteMapper logicalDeleteMapper,
+                               DocumentElementMapper elementMapper,
+                               DocumentChunkMapper chunkMapper) {
         this.knowledgeBaseService = knowledgeBaseService;
         this.minioStorageService = minioStorageService;
         this.parseTaskService = parseTaskService;
         this.parseTaskProducer = parseTaskProducer;
         this.accessService = accessService;
         this.logicalDeleteMapper = logicalDeleteMapper;
+        this.elementMapper = elementMapper;
+        this.chunkMapper = chunkMapper;
     }
 
     @Override
@@ -62,7 +75,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         if (kbId == null) {
             throw BusinessException.badRequest("kbId 不能为空");
         }
-        if (knowledgeBaseService.getById(kbId) == null) {
+        var kb = knowledgeBaseService.getById(kbId);
+        if (kb == null) {
             throw BusinessException.notFound("知识库不存在");
         }
         accessService.require(kbId, KbAccessService.PERM_WRITE);
@@ -100,6 +114,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         message.setStorageKey(objectKey);
         message.setFileName(originalName);
         message.setFileType(fileType);
+        message.setAttempt(1);
+        message.setChunkConfig(buildChunkConfig(kb));
         parseTaskProducer.send(message);
 
         return toDTO(document);
@@ -140,6 +156,66 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
     }
 
     @Override
+    public Map<String, Object> content(Long id) {
+        Document document = getById(id);
+        if (document == null) {
+            throw BusinessException.notFound("文档不存在");
+        }
+        accessService.require(document.getKbId(), KbAccessService.PERM_READ);
+        long version = document.getVersion() == null ? 1L : document.getVersion().longValue();
+        List<DocumentElement> elements = elementMapper.selectList(
+                Wrappers.<DocumentElement>lambdaQuery()
+                        .eq(DocumentElement::getDocumentId, id)
+                        .eq(DocumentElement::getVersionId, version)
+                        .orderByAsc(DocumentElement::getCreatedAt));
+
+        StringBuilder fullText = new StringBuilder();
+        for (DocumentElement element : elements) {
+            if (element.getContent() == null || element.getContent().isBlank()) {
+                continue;
+            }
+            if (fullText.length() > 0) {
+                fullText.append('\n');
+            }
+            fullText.append(element.getContent());
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("document_id", id);
+        result.put("version", version);
+        result.put("status", document.getStatus());
+        result.put("content", fullText.toString());
+        result.put("elements", elements.stream().map(this::toElementMap).collect(Collectors.toList()));
+        return result;
+    }
+
+    @Override
+    public PageResult<Map<String, Object>> chunks(Long id, String chunkType, Integer page,
+                                                  long current, long size) {
+        Document document = getById(id);
+        if (document == null) {
+            throw BusinessException.notFound("文档不存在");
+        }
+        accessService.require(document.getKbId(), KbAccessService.PERM_READ);
+        long version = document.getVersion() == null ? 1L : document.getVersion().longValue();
+
+        var query = Wrappers.<DocumentChunk>lambdaQuery()
+                .eq(DocumentChunk::getDocumentId, id)
+                .eq(DocumentChunk::getVersionId, version);
+        if (chunkType != null && !chunkType.isBlank()) {
+            query.eq(DocumentChunk::getChunkType, chunkType);
+        }
+        if (page != null) {
+            query.le(DocumentChunk::getPageStart, page).ge(DocumentChunk::getPageEnd, page);
+        }
+        query.orderByAsc(DocumentChunk::getChunkIndex);
+        IPage<DocumentChunk> result = chunkMapper.selectPage(new Page<>(current, size), query);
+        return PageResult.of(result, result.getRecords().stream()
+                .map(this::toChunkMap)
+                .collect(Collectors.toList()));
+    }
+
+    @Override
     public void delete(Long id) {
         Document document = getById(id);
         if (document == null) {
@@ -164,6 +240,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
             throw BusinessException.notFound("文档不存在");
         }
         accessService.require(document.getKbId(), KbAccessService.PERM_WRITE);
+        var kb = knowledgeBaseService.getById(document.getKbId());
         ParseTask task = parseTaskService.createTask(document.getId(), document.getKbId());
         ParseTaskMessage message = new ParseTaskMessage();
         message.setTaskId(task.getId());
@@ -172,11 +249,53 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         message.setStorageKey(document.getStorageKey());
         message.setFileName(document.getFileName());
         message.setFileType(document.getFileType());
+        int attempt = task.getRetryCount() == null ? 1 : task.getRetryCount() + 1;
+        message.setAttempt(attempt);
+        message.setChunkConfig(kb == null ? null : buildChunkConfig(kb));
         parseTaskProducer.send(message);
 
         document.setStatus("PENDING");
+        document.setVersion((document.getVersion() == null ? 1 : document.getVersion()) + 1);
         updateById(document);
         return toDTO(document);
+    }
+
+    private Map<String, Object> toElementMap(DocumentElement element) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("element_id", element.getElementId());
+        map.put("type", element.getType());
+        map.put("content", element.getContent());
+        map.put("level", element.getLevel());
+        map.put("page", element.getPage());
+        map.put("page_start", element.getPageStart());
+        map.put("page_end", element.getPageEnd());
+        map.put("heading_path", element.getHeadingPath());
+        map.put("table_data", element.getTableData());
+        map.put("metadata", element.getMetadata());
+        return map;
+    }
+
+    private Map<String, Object> toChunkMap(DocumentChunk chunk) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("chunk_index", chunk.getChunkIndex());
+        map.put("chunk_type", chunk.getChunkType());
+        map.put("content", chunk.getContent());
+        map.put("token_count", chunk.getTokenCount());
+        map.put("heading_path", chunk.getHeadingPath());
+        map.put("page_start", chunk.getPageStart());
+        map.put("page_end", chunk.getPageEnd());
+        map.put("element_ids", chunk.getElementIds());
+        map.put("metadata", chunk.getMetadata());
+        return map;
+    }
+
+    private Map<String, Object> buildChunkConfig(com.agentkb.knowledge.entity.KnowledgeBase kb) {
+        Map<String, Object> config = new HashMap<>();
+        config.put("chunk_size", kb.getChunkSize());
+        config.put("chunk_overlap", kb.getChunkOverlap());
+        config.put("chunk_strategy", kb.getChunkStrategy());
+        config.put("parent_child_enabled", true);
+        return config;
     }
 
     private String resolveFileType(String fileName) {
