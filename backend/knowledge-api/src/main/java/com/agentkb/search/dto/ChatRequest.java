@@ -9,6 +9,8 @@ public class ChatRequest {
 
     private Long knowledgeBaseId;
 
+    private Long sessionId;
+
     @NotBlank(message = "question 不能为空")
     private String question;
 
@@ -20,6 +22,14 @@ public class ChatRequest {
 
     public void setKnowledgeBaseId(Long knowledgeBaseId) {
         this.knowledgeBaseId = knowledgeBaseId;
+    }
+
+    public Long getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(Long sessionId) {
+        this.sessionId = sessionId;
     }
 
     public String getQuestion() {

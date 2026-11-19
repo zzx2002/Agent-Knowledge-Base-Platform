@@ -39,6 +39,23 @@ export interface ChatParams {
   knowledgeBaseId: string
   question: string
   topK?: number
+  sessionId?: string
+}
+
+export interface ChatSession {
+  id: string
+  knowledge_base_id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatHistoryMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  sources?: ChatSource[]
+  created_at: string
 }
 
 export interface ChatResult {
@@ -59,6 +76,25 @@ export function debugSearch(params: SearchParams) {
 /** RAG 问答 POST /chat */
 export function chat(params: ChatParams) {
   return request.post<ApiResult<ChatResult>>('/chat', params)
+}
+
+/** 会话历史 */
+export function listChatSessions(knowledgeBaseId?: string) {
+  return request.get<ApiResult<ChatSession[]>>('/chat/sessions', {
+    params: knowledgeBaseId ? { knowledgeBaseId } : {},
+  })
+}
+
+export function createChatSession(data: { knowledgeBaseId: string; title?: string }) {
+  return request.post<ApiResult<ChatSession>>('/chat/sessions', data)
+}
+
+export function getChatMessages(sessionId: string) {
+  return request.get<ApiResult<ChatHistoryMessage[]>>(`/chat/sessions/${sessionId}/messages`)
+}
+
+export function deleteChatSession(sessionId: string) {
+  return request.delete<ApiResult<null>>(`/chat/sessions/${sessionId}`)
 }
 
 /**

@@ -43,13 +43,16 @@ public class ChatService {
     private final SearchService searchService;
     private final LlmProperties properties;
     private final RestTemplate restTemplate;
+    private final ChatHistoryService historyService;
 
     public ChatService(SearchService searchService,
                        LlmProperties properties,
-                       @Qualifier("searchRestTemplate") RestTemplate restTemplate) {
+                       @Qualifier("searchRestTemplate") RestTemplate restTemplate,
+                       ChatHistoryService historyService) {
         this.searchService = searchService;
         this.properties = properties;
         this.restTemplate = restTemplate;
+        this.historyService = historyService;
     }
 
     /** 非流式问答。 */
@@ -85,6 +88,8 @@ public class ChatService {
         ChatResponseDTO result = new ChatResponseDTO();
         result.setAnswer(answer);
         result.setSources(sources);
+        historyService.append(request.getSessionId(), "user", request.getQuestion(), null);
+        historyService.append(request.getSessionId(), "assistant", answer, sources);
         return result;
     }
 

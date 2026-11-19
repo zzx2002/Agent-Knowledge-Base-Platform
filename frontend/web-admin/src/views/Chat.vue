@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Promotion, Delete, Document } from '@element-plus/icons-vue'
-import { chatStream, type ChatSource } from '@/api/search'
+import { Promotion, Delete, Document, Plus } from '@element-plus/icons-vue'
+import {
+  chatStream,
+  listChatSessions,
+  createChatSession,
+  getChatMessages,
+  deleteChatSession,
+  type ChatSession,
+  type ChatSource,
+} from '@/api/search'
 import { useKbStore } from '@/stores/kb'
 
 interface Message {
@@ -19,14 +27,54 @@ const abortController = ref<AbortController | null>(null)
 const scrollRef = ref<HTMLDivElement>()
 const debugVisible = ref(false)
 const debugSources = ref<ChatSource[]>([])
+const sessions = ref<ChatSession[]>([])
+const currentSessionId = ref('')
 
-onMounted(() => {
-  if (!kbStore.knowledgeBases.length) kbStore.fetchKnowledgeBases()
+onMounted(async () => {
+  if (!kbStore.knowledgeBases.length) await kbStore.fetchKnowledgeBases()
+  await loadSessions()
 })
 
 async function scrollToBottom() {
   await nextTick()
   if (scrollRef.value) scrollRef.value.scrollTop = scrollRef.value.scrollHeight
+}
+
+async function loadSessions() {
+  if (!kbStore.currentKbId) {
+    sessions.value = []
+    return
+  }
+  const res = await listChatSessions(kbStore.currentKbId)
+  sessions.value = ((res as any).data ?? res) as ChatSession[]
+}
+
+async function openSession(sessionId: string) {
+  currentSessionId.value = sessionId
+  if (!sessionId) {
+    messages.value = []
+    return
+  }
+  const res = await getChatMessages(sessionId)
+  const list = ((res as any).data ?? res) as Array<{
+    role: 'user' | 'assistant'
+    content: string
+    sources?: ChatSource[]
+  }>
+  messages.value = list.map((m) => ({ role: m.role, content: m.content, sources: m.sources || [] }))
+  await scrollToBottom()
+}
+
+function startNewSession() {
+  currentSessionId.value = ''
+  messages.value = []
+}
+
+async function removeSession() {
+  if (!currentSessionId.value) return
+  await deleteChatSession(currentSessionId.value)
+  startNewSession()
+  await loadSessions()
 }
 
 async function send() {
@@ -35,6 +83,16 @@ async function send() {
   if (!kbStore.currentKbId) {
     ElMessage.warning('请先选择知识库')
     return
+  }
+
+  if (!currentSessionId.value) {
+    const created = await createChatSession({
+      knowledgeBaseId: kbStore.currentKbId,
+      title: q.slice(0, 30),
+    })
+    const session = ((created as any).data ?? created) as ChatSession
+    currentSessionId.value = session.id
+    await loadSessions()
   }
 
   messages.value.push({ role: 'user', content: q })
@@ -49,7 +107,7 @@ async function send() {
   abortController.value = new AbortController()
   try {
     await chatStream(
-      { knowledgeBaseId: kbStore.currentKbId, question: q, topK: 5 },
+      { knowledgeBaseId: kbStore.currentKbId, question: q, topK: 5, sessionId: currentSessionId.value },
       (text) => {
         liveMsg.content += text
         scrollToBottom()
@@ -120,10 +178,26 @@ function openCitation(sources: ChatSource[] = [], index?: number) {
     <el-card shadow="never" class="chat-card">
       <template #header>
         <div class="toolbar">
-          <el-select v-model="kbStore.currentKbId" placeholder="请选择知识库" style="width: 240px">
+          <el-select
+            v-model="kbStore.currentKbId"
+            placeholder="请选择知识库"
+            style="width: 200px"
+            @change="startNewSession(); loadSessions()"
+          >
             <el-option v-for="kb in kbStore.knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id" />
           </el-select>
-          <el-button :icon="Delete" @click="clear">清空对话</el-button>
+          <el-select
+            :model-value="currentSessionId"
+            placeholder="新对话"
+            style="width: 220px"
+            clearable
+            @change="openSession"
+          >
+            <el-option v-for="session in sessions" :key="session.id" :label="session.title" :value="session.id" />
+          </el-select>
+          <el-button :icon="Plus" @click="startNewSession">新对话</el-button>
+          <el-button :icon="Delete" @click="removeSession">删除会话</el-button>
+          <el-button @click="clear">清空屏幕</el-button>
         </div>
       </template>
 
