@@ -12,6 +12,7 @@ import {
   Coin,
   List,
   SwitchButton,
+  Bell,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -44,100 +45,299 @@ async function handleLogout() {
 </script>
 
 <template>
-  <el-container class="layout">
-    <el-aside width="220px" class="aside">
-      <div class="logo">
-        <span class="logo-mark">KB</span>
-        <span class="logo-text">Agent 知识库平台</span>
-      </div>
-      <el-menu
-        :default-active="activeMenu"
-        background-color="#001529"
-        text-color="#bfcbd9"
-        active-text-color="#409eff"
-        router
-      >
-        <el-menu-item-group title="用户工作台">
-          <el-menu-item v-for="m in workspaceMenus" :key="m.path" :index="m.path">
-            <el-icon><component :is="m.icon" /></el-icon>
-            <span>{{ m.title }}</span>
-          </el-menu-item>
-        </el-menu-item-group>
-        <el-menu-item-group title="管理后台">
-          <el-menu-item v-for="m in adminMenus" :key="m.path" :index="m.path">
-            <el-icon><component :is="m.icon" /></el-icon>
-            <span>{{ m.title }}</span>
-          </el-menu-item>
-        </el-menu-item-group>
-      </el-menu>
-    </el-aside>
-
-    <el-container>
-      <el-header class="header">
-        <div class="breadcrumb">{{ groupTitle }} / {{ route.meta.title || '首页' }}</div>
-        <div class="header-right">
-          <span class="username">{{ auth.username || '管理员' }}</span>
-          <el-button text :icon="SwitchButton" @click="handleLogout">退出登录</el-button>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">KB</div>
+        <div class="brand-copy">
+          <strong>知识库平台</strong>
+          <span>Agent Knowledge Base</span>
         </div>
-      </el-header>
-      <el-main class="main">
+      </div>
+
+      <nav class="nav">
+        <div class="nav-group">
+          <div class="nav-title">用户工作台</div>
+          <router-link
+            v-for="item in workspaceMenus"
+            :key="item.path"
+            :to="item.path"
+            class="nav-item"
+            :class="{ active: activeMenu === item.path }"
+          >
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.title }}</span>
+          </router-link>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-title">管理后台</div>
+          <router-link
+            v-for="item in adminMenus"
+            :key="item.path"
+            :to="item.path"
+            class="nav-item"
+            :class="{ active: activeMenu === item.path }"
+          >
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.title }}</span>
+          </router-link>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="avatar">{{ (auth.username || '管').slice(0, 1).toUpperCase() }}</div>
+        <div class="user-copy">
+          <strong>{{ auth.username || '管理员' }}</strong>
+          <span>平台管理员</span>
+        </div>
+        <el-button text circle :icon="SwitchButton" title="退出登录" @click="handleLogout" />
+      </div>
+    </aside>
+
+    <section class="content-shell">
+      <header class="topbar">
+        <div class="crumb">
+          <span class="crumb-group">{{ groupTitle }}</span>
+          <span class="crumb-sep">/</span>
+          <span class="crumb-page">{{ route.meta.title || '首页' }}</span>
+        </div>
+        <div class="topbar-right">
+          <div class="top-search">
+            <el-icon><Search /></el-icon>
+            <span>搜索功能、文档或设置</span>
+          </div>
+          <el-button text circle :icon="Bell" />
+          <div class="top-avatar">{{ (auth.username || '管').slice(0, 1).toUpperCase() }}</div>
+        </div>
+      </header>
+      <main class="main">
         <RouterView />
-      </el-main>
-    </el-container>
-  </el-container>
+      </main>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.layout {
+.app-shell {
   height: 100vh;
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+  background: #ebedf4;
 }
-.aside {
-  background: #001529;
+
+.sidebar {
+  width: 238px;
+  flex: 0 0 238px;
+  background: #fff;
+  border: 1px solid var(--kb-border);
+  border-radius: 22px;
+  box-shadow: var(--kb-shadow);
+  display: flex;
+  flex-direction: column;
+  padding: 22px 14px 14px;
 }
-.logo {
-  height: 60px;
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 24px;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, #6c5ce7, #9a8cf5);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 15px;
+  box-shadow: 0 8px 18px rgba(108, 92, 231, 0.3);
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.brand-copy strong {
+  font-size: 15px;
+  color: #1c2030;
+}
+
+.brand-copy span {
+  font-size: 11px;
+  color: var(--kb-muted);
+}
+
+.nav {
+  flex: 1;
+  overflow: auto;
+}
+
+.nav-group + .nav-group {
+  margin-top: 26px;
+}
+
+.nav-title {
+  padding: 0 14px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: #a3a9b8;
+}
+
+.nav-item {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 14px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  color: #6d7486;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.18s ease;
+}
+
+.nav-item:hover {
+  background: #f7f6ff;
+  color: var(--kb-primary);
+}
+
+.nav-item.active {
+  background: var(--kb-primary-soft);
+  color: var(--kb-primary);
+  font-weight: 600;
+}
+
+.sidebar-footer {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 16px;
+  padding: 12px 8px 2px;
+  border-top: 1px solid var(--kb-border);
+}
+
+.avatar,
+.top-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ffb86b, #ff8e72);
   color: #fff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-.logo-mark {
-  background: #409eff;
-  border-radius: 6px;
-  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 700;
-  font-size: 14px;
 }
-.logo-text {
-  font-size: 14px;
-  white-space: nowrap;
+
+.user-copy {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
 }
-.el-menu {
-  border-right: none;
+
+.user-copy strong {
+  font-size: 13px;
 }
-.header {
+
+.user-copy span {
+  font-size: 11px;
+  color: var(--kb-muted);
+}
+
+.content-shell {
+  flex: 1;
+  min-width: 0;
+  background: #f7f8fc;
+  border: 1px solid var(--kb-border);
+  border-radius: 22px;
+  box-shadow: var(--kb-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 64px;
+  flex: 0 0 64px;
   background: #fff;
   border-bottom: 1px solid var(--kb-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 0 26px;
 }
-.breadcrumb {
-  color: var(--kb-muted);
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
 }
-.header-right {
+
+.crumb-group {
+  color: var(--kb-muted);
+}
+
+.crumb-sep {
+  color: #c7cbd6;
+}
+
+.crumb-page {
+  color: #1c2030;
+  font-weight: 600;
+}
+
+.topbar-right {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.username {
-  font-size: 14px;
+
+.top-search {
+  width: 260px;
+  height: 36px;
+  border-radius: 18px;
+  background: #f5f6fa;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  color: #a1a7b6;
+  font-size: 12px;
 }
+
 .main {
-  background: var(--kb-bg);
-  padding: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    width: 72px;
+    flex-basis: 72px;
+    padding: 18px 10px;
+  }
+  .brand-copy,
+  .nav-title,
+  .nav-item span,
+  .user-copy,
+  .top-search {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+    padding: 0;
+  }
 }
 </style>

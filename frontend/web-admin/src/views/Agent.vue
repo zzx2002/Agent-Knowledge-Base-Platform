@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Connection, DocumentCopy } from '@element-plus/icons-vue'
+import {
+  Plus,
+  Delete,
+  Connection,
+  DocumentCopy,
+  Key,
+  Link,
+  Lock,
+  MagicStick,
+  Clock,
+  Collection,
+} from '@element-plus/icons-vue'
 
 // Agent 接入管理占位数据（对应文档 9.6）
 interface AgentClient {
@@ -63,13 +74,13 @@ function createAgent() {
     created_at: new Date().toLocaleString('zh-CN'),
   })
   dialogVisible.value = false
-  ElMessage.success('Agent 客户端创建成功（占位）')
+  ElMessage.success('Agent 客户端创建成功')
 }
 
 async function remove(row: AgentClient) {
   await ElMessageBox.confirm(`确认删除客户端「${row.name}」？`, '提示', { type: 'warning' })
   list.value = list.value.filter((item) => item.id !== row.id)
-  ElMessage.success('已删除（占位）')
+  ElMessage.success('客户端已删除')
 }
 
 function copy(text: string) {
@@ -84,59 +95,89 @@ function createToken(row: AgentClient) {
 </script>
 
 <template>
-  <div class="page-container">
+  <div class="page-container agent-page">
     <div class="page-header">
       <h2 class="page-title">Agent 接入管理</h2>
-      <p class="page-desc">查看 MCP Endpoint，管理 Agent 客户端、OAuth 授权与访问令牌（占位数据）</p>
+      <p class="page-desc">配置 MCP 与 REST API 接入地址，管理 Agent 客户端、OAuth 授权与访问令牌。</p>
     </div>
 
+    <!-- 接入地址卡片 -->
     <el-card shadow="never" class="endpoint-card">
       <template #header>
-        <div class="card-title"><el-icon><Connection /></el-icon> 服务端接入地址</div>
-      </template>
-      <div class="endpoint-row">
-        <span class="endpoint-label">MCP Endpoint：</span>
-        <code>{{ mcpEndpoint }}</code>
-        <el-button link type="primary" :icon="DocumentCopy" @click="copy(mcpEndpoint)">复制</el-button>
-      </div>
-      <div class="endpoint-row">
-        <span class="endpoint-label">REST API：</span>
-        <code>{{ apiEndpoint }}</code>
-        <el-button link type="primary" :icon="DocumentCopy" @click="copy(apiEndpoint)">复制</el-button>
-      </div>
-    </el-card>
-
-    <el-card shadow="never" style="margin-top: 16px">
-      <template #header>
-        <div class="toolbar">
-          <span class="card-title">Agent 客户端</span>
-          <el-button type="primary" :icon="Plus" @click="openCreate">创建客户端</el-button>
+        <div class="endpoint-head">
+          <div class="endpoint-head-icon"><el-icon><Connection /></el-icon></div>
+          <div class="endpoint-head-copy">
+            <div class="section-title">服务端接入地址</div>
+            <div class="section-sub">将以下地址配置到你的 Agent 客户端（示例配置）</div>
+          </div>
+          <span class="section-tag">接入配置</span>
         </div>
       </template>
-
-      <el-table :data="list" border stripe>
-        <el-table-column prop="name" label="客户端名称" min-width="160" />
-        <el-table-column prop="client_id" label="Client ID" min-width="180" />
-        <el-table-column prop="grant_type" label="授权方式" min-width="200" />
-        <el-table-column label="可访问知识库" min-width="200">
-          <template #default="{ row }">
-            <el-tag v-for="kb in row.allowed_kbs" :key="kb" size="small" style="margin-right: 6px">{{ kb }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.status === '启用' ? 'success' : 'info'">{{ row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="170" />
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="createToken(row)">Token 管理</el-button>
-            <el-button link type="danger" :icon="Delete" @click="remove(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="endpoint-grid">
+        <div class="endpoint-item">
+          <div class="endpoint-item-head">
+            <span class="endpoint-name"><el-icon><Link /></el-icon> MCP Endpoint</span>
+            <el-button link type="primary" :icon="DocumentCopy" @click="copy(mcpEndpoint)">复制</el-button>
+          </div>
+          <code>{{ mcpEndpoint }}</code>
+        </div>
+        <div class="endpoint-item">
+          <div class="endpoint-item-head">
+            <span class="endpoint-name"><el-icon><Collection /></el-icon> REST API</span>
+            <el-button link type="primary" :icon="DocumentCopy" @click="copy(apiEndpoint)">复制</el-button>
+          </div>
+          <code>{{ apiEndpoint }}</code>
+        </div>
+      </div>
     </el-card>
+
+    <!-- Agent 客户端卡片网格 -->
+    <div class="clients-head">
+      <div class="head-copy">
+        <div class="section-title"><el-icon><Key /></el-icon> Agent 客户端</div>
+        <div class="section-sub">共 {{ list.length }} 个客户端</div>
+      </div>
+      <el-button type="primary" :icon="Plus" @click="openCreate">创建客户端</el-button>
+    </div>
+
+    <div class="agent-grid">
+      <div v-for="row in list" :key="row.id" class="agent-card">
+        <div class="agent-top">
+          <div class="agent-avatar"><el-icon><MagicStick /></el-icon></div>
+          <div class="agent-identity">
+            <div class="agent-name">{{ row.name }}</div>
+            <div class="agent-client"><span>Client ID</span> {{ row.client_id }}</div>
+          </div>
+          <span class="state-chip" :class="row.status === '启用' ? 'on' : 'off'">{{ row.status }}</span>
+        </div>
+
+        <div class="agent-body">
+          <div class="meta-line">
+            <span class="meta-key"><el-icon><Lock /></el-icon> 授权方式</span>
+            <span class="meta-val">{{ row.grant_type }}</span>
+          </div>
+          <div class="meta-line align-top">
+            <span class="meta-key"><el-icon><Collection /></el-icon> 允许知识库</span>
+            <span class="kb-chips">
+              <span v-for="kb in row.allowed_kbs" :key="kb" class="kb-chip">{{ kb }}</span>
+              <span v-if="!row.allowed_kbs.length" class="no-kb">未配置</span>
+            </span>
+          </div>
+          <div class="meta-line">
+            <span class="meta-key"><el-icon><Clock /></el-icon> 创建时间</span>
+            <span class="meta-val">{{ row.created_at }}</span>
+          </div>
+        </div>
+
+        <div class="agent-footer">
+          <el-button link type="primary" :icon="DocumentCopy" @click="copy(row.client_id)">复制 Client ID</el-button>
+          <div class="footer-actions">
+            <el-button type="primary" plain :icon="Key" @click="createToken(row)">生成令牌</el-button>
+            <el-button link type="danger" :icon="Delete" @click="remove(row)">删除</el-button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <el-dialog v-model="dialogVisible" title="创建 Agent 客户端" width="500px">
       <el-form :model="form" label-width="120px">
@@ -157,44 +198,273 @@ function createToken(row: AgentClient) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="tokenVisible" title="Access Token（占位）" width="500px">
-      <el-alert type="warning" :closable="false" show-icon title="生产环境请通过服务端 OAuth 流程签发令牌，此处为占位展示" />
+    <el-dialog v-model="tokenVisible" title="Access Token" width="500px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="生产环境请通过服务端 OAuth 流程签发令牌，此处为示例令牌，请勿用于真实环境"
+      />
       <pre class="token-box">{{ generatedToken }}</pre>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.endpoint-card {
-  margin-bottom: 0;
+.agent-page {
+  padding-bottom: 40px;
 }
-.card-title {
+
+/* 接入地址卡片 */
+.endpoint-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.endpoint-head-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6c5ce7, #8b7cf1);
+  color: #fff;
+  font-size: 19px;
+  box-shadow: 0 6px 14px rgba(108, 92, 231, 0.25);
+}
+.endpoint-head-copy {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2434;
+}
+.section-title .el-icon {
+  color: var(--kb-primary);
+  font-size: 18px;
+}
+.section-sub {
+  font-size: 12px;
+  color: var(--kb-muted);
+}
+.section-tag {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--kb-primary-soft);
+  color: var(--kb-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.endpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.endpoint-item {
+  padding: 14px 16px;
+  border: 1px solid var(--kb-border);
+  border-radius: 14px;
+  background: #faf9ff;
+}
+.endpoint-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.endpoint-name {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5c6377;
+}
+.endpoint-name .el-icon {
+  color: var(--kb-primary);
+}
+.endpoint-item code {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px dashed #d9d3ff;
+  color: var(--kb-primary);
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+/* 客户端头部 */
+.clients-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 24px 0 16px;
+}
+.head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 客户端卡片网格 */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 16px;
+}
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--kb-surface);
+  border: 1px solid var(--kb-border);
+  border-radius: var(--kb-radius);
+  box-shadow: var(--kb-shadow);
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.agent-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 38px rgba(31, 36, 52, 0.1);
+}
+.agent-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 18px 14px;
+}
+.agent-avatar {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6c5ce7, #9a8cf5);
+  color: #fff;
+  font-size: 21px;
+  box-shadow: 0 6px 14px rgba(108, 92, 231, 0.25);
+}
+.agent-identity {
+  flex: 1;
+  min-width: 0;
+}
+.agent-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2434;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-client {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--kb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-client span {
+  color: #a5aabc;
+  margin-right: 4px;
+}
+.state-chip {
+  flex: 0 0 auto;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 600;
 }
-.endpoint-row {
+.state-chip.on {
+  background: #e8f8f0;
+  color: #16a34a;
+}
+.state-chip.off {
+  background: #f4f5f7;
+  color: #7b8399;
+}
+
+.agent-body {
+  flex: 1;
+  padding: 4px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.meta-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.meta-line.align-top {
+  align-items: flex-start;
+}
+.meta-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--kb-muted);
+}
+.meta-key .el-icon {
+  color: #a5aabc;
+  font-size: 14px;
+}
+.meta-val {
+  color: #1f2434;
+  font-weight: 500;
+  text-align: right;
+  word-break: break-all;
+}
+.kb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.kb-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--kb-primary-soft);
+  color: var(--kb-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.no-kb {
+  color: var(--kb-muted);
+  font-size: 12px;
+}
+
+.agent-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--kb-border);
+  background: #fcfcfe;
+}
+.footer-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
 }
-.endpoint-label {
-  width: 110px;
-  color: var(--kb-muted);
-}
-code {
-  background: #f4f4f5;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 13px;
-}
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+
 .token-box {
   margin-top: 12px;
   padding: 12px;
@@ -202,5 +472,10 @@ code {
   border-radius: 4px;
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+@media (max-width: 768px) {
+  .endpoint-grid { grid-template-columns: 1fr; }
+  .agent-footer { flex-wrap: wrap; }
 }
 </style>

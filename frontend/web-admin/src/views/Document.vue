@@ -32,6 +32,47 @@ const chunks = ref<DocumentChunkItem[]>([])
 const previewTab = ref('content')
 const chunkTotal = ref(0)
 
+function statusType(status?: string) {
+  switch (status) {
+    case 'COMPLETED':
+      return 'success'
+    case 'PROCESSING':
+      return 'processing'
+    case 'PENDING':
+      return 'pending'
+    case 'FAILED':
+      return 'danger'
+    case 'CANCELLED':
+      return 'info'
+    default:
+      return 'info'
+  }
+}
+
+function statusLabel(status?: string) {
+  switch (status) {
+    case 'COMPLETED':
+      return '已解析'
+    case 'PROCESSING':
+      return '解析中'
+    case 'PENDING':
+      return '待解析'
+    case 'FAILED':
+      return '解析失败'
+    case 'CANCELLED':
+      return '已取消'
+    default:
+      return '待处理'
+  }
+}
+
+function formatSize(size?: number) {
+  if (size === undefined || size === null) return '—'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
 async function loadData() {
   if (!kbStore.currentKbId) await kbStore.fetchKnowledgeBases()
   loading.value = true
@@ -108,19 +149,26 @@ onMounted(loadData)
     </div>
 
     <el-card shadow="never" class="upload-card">
-      <el-select
-        v-model="kbStore.currentKbId"
-        placeholder="请选择知识库"
-        style="width: 240px; margin-bottom: 12px"
-        @change="loadData"
-      >
-        <el-option
-          v-for="kb in kbStore.knowledgeBases"
-          :key="kb.id"
-          :label="kb.name"
-          :value="kb.id"
-        />
-      </el-select>
+      <div class="upload-header">
+        <div>
+          <h3 class="section-title">上传文档</h3>
+          <p class="section-sub">文档上传后会自动解析并切分为分块，供检索与对话使用</p>
+        </div>
+        <el-select
+          v-model="kbStore.currentKbId"
+          placeholder="请选择知识库"
+          style="width: 240px"
+          @change="loadData"
+        >
+          <el-option
+            v-for="kb in kbStore.knowledgeBases"
+            :key="kb.id"
+            :label="kb.name"
+            :value="kb.id"
+          />
+        </el-select>
+      </div>
+
       <el-upload
         class="upload-area"
         drag
@@ -129,37 +177,49 @@ onMounted(loadData)
         :http-request="(options: any) => handleUpload(options.file)"
         accept=".doc,.docx,.ppt,.pptx,.md,.txt,.pdf,.xls,.xlsx,.csv,.png,.jpg,.jpeg"
       >
-        <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-        <div class="el-upload__text">将文件拖到此处，或 <em>点击上传</em></div>
-        <template #tip>
-          <div class="el-upload__tip">
-            支持 DOC/DOCX/PPT/PPTX/MD/TXT/PDF/XLS/XLSX/CSV/PNG/JPG，支持批量上传
-          </div>
-        </template>
+        <div class="upload-inner">
+          <div class="upload-icon-wrap"><el-icon><UploadFilled /></el-icon></div>
+          <div class="upload-title">将文件拖拽到此处，或 <em>点击上传</em></div>
+          <div class="upload-hint">支持 DOC / DOCX / PPT / PPTX / MD / TXT / PDF / XLS / XLSX / CSV / PNG / JPG，可批量上传</div>
+        </div>
       </el-upload>
     </el-card>
 
-    <el-card shadow="never" style="margin-top: 16px">
-      <template #header>
-        <div class="toolbar">
+    <el-card shadow="never" class="table-card">
+      <div class="filter-bar">
+        <div class="filter-left">
+          <span class="filter-label">筛选</span>
           <el-input
             v-model="keyword"
             placeholder="搜索文档名称"
             clearable
-            style="width: 240px"
+            style="width: 260px"
             :prefix-icon="Search"
             @keyup.enter="loadData"
           />
           <el-button :icon="Search" @click="loadData">查询</el-button>
         </div>
-      </template>
+        <span class="filter-count">共 {{ total }} 个文档</span>
+      </div>
 
-      <el-table :data="list" v-loading="loading" border stripe>
-        <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="file_type" label="类型" width="90" />
-        <el-table-column prop="status" label="解析状态" width="120" />
-        <el-table-column prop="file_size" label="大小(Byte)" width="120" />
-        <el-table-column prop="created_at" label="上传时间" width="170" />
+      <el-table :data="list" v-loading="loading">
+        <el-table-column prop="file_name" label="文件名" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="file_type" label="类型" width="100">
+          <template #default="{ row }">
+            <span class="type-chip">{{ row.file_type || '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="解析状态" width="130">
+          <template #default="{ row }">
+            <span class="status-tag" :class="`status-${statusType(row.status)}`">
+              <i class="status-dot"></i>{{ statusLabel(row.status) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="大小" width="120">
+          <template #default="{ row }">{{ formatSize(row.file_size) }}</template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="上传时间" width="180" />
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="View" @click="preview(row)">解析结果</el-button>
@@ -210,18 +270,150 @@ onMounted(loadData)
 </template>
 
 <style scoped>
-.toolbar {
+.upload-card {
+  margin-bottom: 18px;
+}
+.upload-header {
   display: flex;
-  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.section-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--kb-text);
+}
+.section-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--kb-muted);
+}
+.upload-area {
+  width: 100%;
+}
+:deep(.upload-area .el-upload) {
+  width: 100%;
+}
+:deep(.upload-area .el-upload-dragger) {
+  width: 100%;
+  padding: 34px 20px;
+  border: 2px dashed var(--el-color-primary-light-7);
+  border-radius: 16px;
+  background: #fbfaff;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+:deep(.upload-area .el-upload-dragger:hover) {
+  border-color: var(--kb-primary);
+  background: var(--kb-primary-soft);
+}
+.upload-inner {
+  text-align: center;
+}
+.upload-icon-wrap {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 14px;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  background: var(--kb-primary-soft);
+  color: var(--kb-primary);
+  font-size: 28px;
+}
+.upload-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--kb-text);
+}
+.upload-title em {
+  font-style: normal;
+  color: var(--kb-primary);
+}
+.upload-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--kb-muted);
+}
+.table-card {
+  margin-top: 0;
+}
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.filter-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.filter-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--kb-muted);
+}
+.filter-count {
+  font-size: 13px;
+  color: var(--kb-muted);
+}
+.type-chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: #f4f5fa;
+  color: #6b7285;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.status-success {
+  color: #1a9d68;
+  background: #eafaf2;
+}
+.status-processing {
+  color: #6c5ce7;
+  background: var(--kb-primary-soft);
+}
+.status-pending {
+  color: #c98a12;
+  background: #fff5e3;
+}
+.status-danger {
+  color: #e0505b;
+  background: #ffeef0;
+}
+.status-info {
+  color: #7a8397;
+  background: #f1f2f7;
 }
 .pagination {
   display: flex;
   justify-content: flex-end;
-  margin-top: 16px;
-}
-.upload-area {
-  width: 100%;
+  margin-top: 18px;
 }
 .content-box {
   max-height: 60vh;
@@ -232,14 +424,15 @@ onMounted(loadData)
   line-height: 1.6;
 }
 .chunk-card {
-  border: 1px solid var(--el-border-color);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border: 1px solid var(--kb-border);
+  border-radius: 12px;
+  padding: 12px 14px;
   margin-bottom: 10px;
+  background: #fcfcff;
 }
 .chunk-meta {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--kb-muted);
   margin-bottom: 6px;
 }
 .chunk-content {
