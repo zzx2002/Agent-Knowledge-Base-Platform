@@ -1,18 +1,13 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, Search, Edit, Delete, Lock, Refresh } from '@element-plus/icons-vue'
+import { Plus, Search, Edit, Delete } from '@element-plus/icons-vue'
 import {
   listKnowledgeBases,
   createKnowledgeBase,
   updateKnowledgeBase,
   deleteKnowledgeBase,
-  listKbPermissions,
-  grantKbPermission,
-  revokeKbPermission,
-  reindexKnowledgeBase,
   type KnowledgeBase as KB,
-  type KbPermissionItem,
 } from '@/api/knowledgeBase'
 
 const list = ref<KB[]>([])
@@ -35,79 +30,6 @@ const form = reactive({
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入知识库名称', trigger: 'blur' }],
-}
-
-// 授权管理
-const permissionVisible = ref(false)
-const permissionKb = ref<KB | null>(null)
-const permissions = ref<KbPermissionItem[]>([])
-const permissionForm = reactive({
-  subject_type: 'USER' as 'USER' | 'ROLE',
-  subject_id: '',
-  permission: 'READ' as KbPermissionItem['permission'],
-})
-const permissionLoading = ref(false)
-const reindexingId = ref('')
-
-async function reindex(row: KB) {
-  await ElMessageBox.confirm(
-    `确认重建「${row.name}」的全部索引？该操作会重新向量化所有分块。`,
-    '重建索引',
-    { type: 'warning' },
-  )
-  reindexingId.value = row.id
-  try {
-    const res = await reindexKnowledgeBase(row.id)
-    const data = (res as any).data ?? res
-    ElMessage.success(`已重建 ${data?.reindexed ?? 0} 个分块`)
-  } finally {
-    reindexingId.value = ''
-  }
-}
-
-async function openPermissions(row: KB) {
-  permissionKb.value = row
-  permissionVisible.value = true
-  await loadPermissions()
-}
-
-async function loadPermissions() {
-  if (!permissionKb.value) return
-  permissionLoading.value = true
-  try {
-    const res = await listKbPermissions(permissionKb.value.id)
-    const data = (res as any).data ?? res
-    permissions.value = Array.isArray(data) ? data : []
-  } finally {
-    permissionLoading.value = false
-  }
-}
-
-async function submitPermission() {
-  if (!permissionKb.value || !permissionForm.subject_id) {
-    ElMessage.warning('请填写主体 ID')
-    return
-  }
-  await grantKbPermission(permissionKb.value.id, {
-    subject_type: permissionForm.subject_type,
-    subject_id: permissionForm.subject_id,
-    permission: permissionForm.permission,
-  })
-  ElMessage.success('授权成功')
-  permissionForm.subject_id = ''
-  await loadPermissions()
-}
-
-async function removePermission(row: KbPermissionItem) {
-  if (!permissionKb.value) return
-  await ElMessageBox.confirm(
-    `确认撤销 ${row.subject_type} ${row.subject_id} 的 ${row.permission} 权限？`,
-    '提示',
-    { type: 'warning' },
-  )
-  await revokeKbPermission(permissionKb.value.id, row.subject_type, row.subject_id, row.permission)
-  ElMessage.success('已撤销')
-  await loadPermissions()
 }
 
 async function loadData() {
@@ -176,8 +98,8 @@ onMounted(loadData)
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">知识库管理</h2>
-      <p class="page-desc">创建与维护知识库，配置 Embedding 模型与分块策略；每个知识库独立隔离，可按需授权</p>
+      <h2 class="page-title">我的知识库</h2>
+      <p class="page-desc">创建知识库后即可上传文档并开始对话，每个知识库的数据相互隔离</p>
     </div>
 
     <el-card shadow="never">
@@ -201,20 +123,11 @@ onMounted(loadData)
         <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
         <el-table-column prop="embedding_model" label="Embedding 模型" width="160" />
         <el-table-column prop="chunk_strategy" label="分块策略" width="140" />
-        <el-table-column prop="owner_id" label="归属用户ID" width="110" />
         <el-table-column prop="document_count" label="文档数" width="100" />
         <el-table-column prop="updated_at" label="更新时间" width="170" />
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="warning" :icon="Lock" @click="openPermissions(row)">授权</el-button>
-            <el-button
-              link
-              type="success"
-              :icon="Refresh"
-              :loading="reindexingId === row.id"
-              @click="reindex(row)"
-            >重建索引</el-button>
             <el-button link type="danger" :icon="Delete" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -258,50 +171,6 @@ onMounted(loadData)
         <el-button type="primary" @click="submit">确定</el-button>
       </template>
     </el-dialog>
-
-    <el-dialog
-      v-model="permissionVisible"
-      :title="`知识库授权 - ${permissionKb?.name || ''}`"
-      width="720px"
-    >
-      <div class="permission-grant">
-        <el-select v-model="permissionForm.subject_type" style="width: 120px">
-          <el-option label="用户" value="USER" />
-          <el-option label="角色" value="ROLE" />
-        </el-select>
-        <el-input
-          v-model="permissionForm.subject_id"
-          :placeholder="permissionForm.subject_type === 'USER' ? '用户 ID' : '角色 ID'"
-          style="width: 180px"
-        />
-        <el-select v-model="permissionForm.permission" style="width: 130px">
-          <el-option label="只读 READ" value="READ" />
-          <el-option label="写入 WRITE" value="WRITE" />
-          <el-option label="删除 DELETE" value="DELETE" />
-          <el-option label="管理 ADMIN" value="ADMIN" />
-        </el-select>
-        <el-button type="primary" @click="submitPermission">授权</el-button>
-        <el-button :icon="Refresh" @click="loadPermissions">刷新</el-button>
-      </div>
-
-      <el-table :data="permissions" v-loading="permissionLoading" border size="small">
-        <el-table-column prop="subject_type" label="主体类型" width="100" />
-        <el-table-column prop="subject_id" label="主体 ID" width="120" />
-        <el-table-column prop="permission" label="权限" width="110" />
-        <el-table-column prop="granted" label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.granted ? 'success' : 'info'">
-              {{ row.granted ? '已授权' : '已禁用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作">
-          <template #default="{ row }">
-            <el-button link type="danger" @click="removePermission(row)">撤销</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
   </div>
 </template>
 
@@ -315,11 +184,5 @@ onMounted(loadData)
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
-}
-.permission-grant {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 16px;
 }
 </style>

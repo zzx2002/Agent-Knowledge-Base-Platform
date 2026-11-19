@@ -2,13 +2,12 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  House,
   DataBoard,
-  FolderOpened,
-  Document,
-  Search,
-  ChatDotRound,
-  List,
+  Lock,
   Connection,
+  Coin,
+  List,
   SwitchButton,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -17,17 +16,18 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const menus = [
-  { path: '/dashboard', title: '系统首页', icon: DataBoard },
-  { path: '/knowledge-bases', title: '知识库管理', icon: FolderOpened },
-  { path: '/documents', title: '文档管理', icon: Document },
-  { path: '/search', title: '知识检索', icon: Search },
-  { path: '/chat', title: '知识库对话', icon: ChatDotRound },
-  { path: '/tasks', title: '解析任务', icon: List },
-  { path: '/agents', title: 'Agent 接入', icon: Connection },
+const workspaceMenus = [{ path: '/workspace', title: '知识工作台', icon: House }]
+
+const adminMenus = [
+  { path: '/admin/dashboard', title: '数据面板', icon: DataBoard },
+  { path: '/admin/permissions', title: '权限管理', icon: Lock },
+  { path: '/admin/indexes', title: '索引运维', icon: Coin },
+  { path: '/admin/tasks', title: '解析任务', icon: List },
+  { path: '/admin/agents', title: 'Agent 接入', icon: Connection },
 ]
 
 const activeMenu = computed(() => route.path)
+const groupTitle = computed(() => (route.meta.group === 'admin' ? '管理后台' : '用户工作台'))
 
 async function handleLogout() {
   await auth.logout()
@@ -49,16 +49,24 @@ async function handleLogout() {
         active-text-color="#409eff"
         router
       >
-        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
-          <el-icon><component :is="m.icon" /></el-icon>
-          <span>{{ m.title }}</span>
-        </el-menu-item>
+        <el-menu-item-group title="用户工作台">
+          <el-menu-item v-for="m in workspaceMenus" :key="m.path" :index="m.path">
+            <el-icon><component :is="m.icon" /></el-icon>
+            <span>{{ m.title }}</span>
+          </el-menu-item>
+        </el-menu-item-group>
+        <el-menu-item-group title="管理后台">
+          <el-menu-item v-for="m in adminMenus" :key="m.path" :index="m.path">
+            <el-icon><component :is="m.icon" /></el-icon>
+            <span>{{ m.title }}</span>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
     </el-aside>
 
     <el-container>
       <el-header class="header">
-        <div class="breadcrumb">当前页面：{{ route.meta.title || '首页' }}</div>
+        <div class="breadcrumb">{{ groupTitle }} / {{ route.meta.title || '首页' }}</div>
         <div class="header-right">
           <span class="username">{{ auth.username || '管理员' }}</span>
           <el-button text :icon="SwitchButton" @click="handleLogout">退出登录</el-button>
