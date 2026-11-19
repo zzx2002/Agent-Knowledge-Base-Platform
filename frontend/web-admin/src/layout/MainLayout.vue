@@ -2,7 +2,10 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  House,
+  FolderOpened,
+  Document,
+  ChatDotRound,
+  Search,
   DataBoard,
   Lock,
   Connection,
@@ -16,7 +19,12 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const workspaceMenus = [{ path: '/workspace', title: '知识工作台', icon: House }]
+const workspaceMenus = [
+  { path: '/workspace/knowledge-bases', title: '我的知识库', icon: FolderOpened },
+  { path: '/workspace/documents', title: '文档上传', icon: Document },
+  { path: '/workspace/chat', title: '知识库对话', icon: ChatDotRound },
+  { path: '/workspace/search', title: '知识检索', icon: Search },
+]
 
 const adminMenus = [
   { path: '/admin/dashboard', title: '数据面板', icon: DataBoard },

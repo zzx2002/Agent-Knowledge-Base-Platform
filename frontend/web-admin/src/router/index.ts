@@ -11,14 +11,35 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: MainLayout,
-    redirect: '/workspace',
+    redirect: '/workspace/knowledge-bases',
     children: [
+      // 用户工作台：独立页面
       {
-        path: 'workspace',
-        name: 'Workspace',
-        component: () => import('@/views/Workspace.vue'),
-        meta: { title: '知识工作台', group: 'workspace' },
+        path: 'workspace/knowledge-bases',
+        name: 'WorkspaceKnowledgeBase',
+        component: () => import('@/views/KnowledgeBase.vue'),
+        meta: { title: '我的知识库', group: 'workspace' },
       },
+      {
+        path: 'workspace/documents',
+        name: 'WorkspaceDocument',
+        component: () => import('@/views/Document.vue'),
+        meta: { title: '文档上传', group: 'workspace' },
+      },
+      {
+        path: 'workspace/chat',
+        name: 'WorkspaceChat',
+        component: () => import('@/views/Chat.vue'),
+        meta: { title: '知识库对话', group: 'workspace' },
+      },
+      {
+        path: 'workspace/search',
+        name: 'WorkspaceSearch',
+        component: () => import('@/views/Search.vue'),
+        meta: { title: '知识检索', group: 'workspace' },
+      },
+
+      // 管理后台
       {
         path: 'admin/dashboard',
         name: 'AdminDashboard',
@@ -49,12 +70,14 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Agent.vue'),
         meta: { title: 'Agent 接入', group: 'admin' },
       },
-      // 旧路径兼容
+
+      // 兼容旧路径
+      { path: 'workspace', redirect: '/workspace/knowledge-bases' },
       { path: 'dashboard', redirect: '/admin/dashboard' },
-      { path: 'knowledge-bases', redirect: '/workspace' },
-      { path: 'documents', redirect: '/workspace' },
-      { path: 'search', redirect: '/workspace' },
-      { path: 'chat', redirect: '/workspace' },
+      { path: 'knowledge-bases', redirect: '/workspace/knowledge-bases' },
+      { path: 'documents', redirect: '/workspace/documents' },
+      { path: 'search', redirect: '/workspace/search' },
+      { path: 'chat', redirect: '/workspace/chat' },
       { path: 'tasks', redirect: '/admin/tasks' },
       { path: 'agents', redirect: '/admin/agents' },
     ],
