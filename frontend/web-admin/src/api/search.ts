@@ -1,35 +1,59 @@
 import request, { type ApiResult } from './request'
 
 export interface SearchParams {
-  knowledge_base_id?: string
+  knowledgeBaseId?: string
   query: string
-  top_k?: number
+  topK?: number
   rerank?: boolean
 }
 
 export interface SearchHit {
-  chunk_id: string
-  document_id: string
-  file_name: string
+  chunkId: string
+  documentId: string
+  fileName?: string
+  content: string
+  headingPath?: string
   page?: number
   score: number
+  keywordScore?: number
+  vectorScore?: number
+  rerankScore?: number
+}
+
+export interface SearchResult {
+  query: string
+  hits: SearchHit[]
+  debug?: Record<string, Array<Record<string, unknown>>>
+}
+
+export interface ChatSource {
+  chunkId: string
+  documentId: string
+  fileName?: string
+  page?: number
   content: string
+  score: number
 }
 
 export interface ChatParams {
-  knowledge_base_id: string
+  knowledgeBaseId: string
   question: string
-  top_k?: number
+  topK?: number
 }
 
 export interface ChatResult {
   answer: string
-  sources: SearchHit[]
+  sources: ChatSource[]
 }
 
 /** 混合检索 POST /search */
 export function search(params: SearchParams) {
-  return request.post<ApiResult<SearchHit[]>>('/search', params)
+  return request.post<ApiResult<SearchResult>>('/search', params)
+}
+
+/** 检索调试 GET /search/debug */
+export function debugSearch(params: SearchParams) {
+  return request.get<ApiResult<SearchResult>>('/search/debug', { params })
 }
 
 /** RAG 问答 POST /chat */
@@ -38,12 +62,13 @@ export function chat(params: ChatParams) {
 }
 
 /**
- * 流式问答 POST /chat/stream（占位实现）
- * 通过 fetch 读取 ReadableStream，逐块回调，实际协议按后端 SSE/流式约定调整。
+ * 流式问答 POST /chat/stream。
+ * 后端 SSE 事件：delta（回答增量）、sources（来源引用）、error（错误）。
  */
 export async function chatStream(
   params: ChatParams,
   onChunk: (text: string) => void,
+  onSources?: (sources: ChatSource[]) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const base = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
@@ -53,6 +78,7 @@ export async function chatStream(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(params),
@@ -65,9 +91,40 @@ export async function chatStream(
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  const handleEvent = (block: string) => {
+    if (!block.trim()) return
+    let event = 'message'
+    const dataLines: string[] = []
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    }
+    const data = dataLines.join('\n')
+    if (!data) return
+    if (event === 'delta') {
+      onChunk(data)
+    } else if (event === 'sources') {
+      try {
+        onSources?.(JSON.parse(data) as ChatSource[])
+      } catch {
+        // 忽略非法来源数据
+      }
+    } else if (event === 'error') {
+      throw new Error(data)
+    }
+  }
+
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
-    onChunk(decoder.decode(value, { stream: true }))
+    buffer += decoder.decode(value, { stream: true })
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() || ''
+    blocks.forEach(handleEvent)
+    if (done) {
+      handleEvent(buffer)
+      break
+    }
   }
 }

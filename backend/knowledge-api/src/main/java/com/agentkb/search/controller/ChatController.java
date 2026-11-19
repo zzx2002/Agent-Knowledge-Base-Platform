@@ -1,8 +1,8 @@
 package com.agentkb.search.controller;
 
-import com.agentkb.common.BusinessException;
+import com.agentkb.chat.dto.ChatResponseDTO;
+import com.agentkb.chat.service.ChatService;
 import com.agentkb.common.R;
-import com.agentkb.security.KbAccessService;
 import com.agentkb.search.dto.ChatRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,37 +11,31 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * RAG 问答接口：/api/v1/chat、/api/v1/chat/stream
- * 第一阶段仅定义路径，返回清晰的 501（RAG 问答属于第四阶段）。
+ * RAG 问答接口：/api/v1/chat、/api/v1/chat/stream。
  */
-@Tag(name = "RAG 问答接口（待实现）")
+@Tag(name = "RAG 问答接口")
 @RestController
 @RequestMapping("/api/v1/chat")
 public class ChatController {
 
-    private final KbAccessService accessService;
+    private final ChatService chatService;
 
-    public ChatController(KbAccessService accessService) {
-        this.accessService = accessService;
+    public ChatController(ChatService chatService) {
+        this.chatService = chatService;
     }
 
-    @Operation(summary = "RAG 问答（第四阶段实现）")
+    @Operation(summary = "RAG 问答")
     @PostMapping
-    public R<Void> chat(@Valid @RequestBody ChatRequest request) {
-        if (request.getKnowledgeBaseId() != null) {
-            accessService.require(request.getKnowledgeBaseId(), KbAccessService.PERM_READ);
-        }
-        throw BusinessException.notImplemented("RAG 问答将在第四阶段（LLM 接入 + 来源引用）实现");
+    public R<ChatResponseDTO> chat(@Valid @RequestBody ChatRequest request) {
+        return R.ok(chatService.chat(request));
     }
 
-    @Operation(summary = "流式问答（第四阶段实现）")
+    @Operation(summary = "流式问答（SSE）")
     @PostMapping("/stream")
-    public R<Void> stream(@Valid @RequestBody ChatRequest request) {
-        if (request.getKnowledgeBaseId() != null) {
-            accessService.require(request.getKnowledgeBaseId(), KbAccessService.PERM_READ);
-        }
-        throw BusinessException.notImplemented("流式问答将在第四阶段实现");
+    public SseEmitter stream(@Valid @RequestBody ChatRequest request) {
+        return chatService.stream(request);
     }
 }

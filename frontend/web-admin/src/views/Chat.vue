@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ChatDotRound, Promotion, Delete } from '@element-plus/icons-vue'
-import { chatStream, type SearchHit } from '@/api/search'
+import { Promotion, Delete, Document } from '@element-plus/icons-vue'
+import { chatStream, type ChatSource } from '@/api/search'
 import { useKbStore } from '@/stores/kb'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
-  sources?: SearchHit[]
+  sources?: ChatSource[]
 }
 
 const kbStore = useKbStore()
@@ -18,7 +18,7 @@ const answering = ref(false)
 const abortController = ref<AbortController | null>(null)
 const scrollRef = ref<HTMLDivElement>()
 const debugVisible = ref(false)
-const debugSources = ref<SearchHit[]>([])
+const debugSources = ref<ChatSource[]>([])
 
 onMounted(() => {
   if (!kbStore.knowledgeBases.length) kbStore.fetchKnowledgeBases()
@@ -31,7 +31,7 @@ async function scrollToBottom() {
 
 async function send() {
   const q = question.value.trim()
-  if (!q) return
+  if (!q || answering.value) return
   if (!kbStore.currentKbId) {
     ElMessage.warning('请先选择知识库')
     return
@@ -46,19 +46,20 @@ async function send() {
 
   abortController.value = new AbortController()
   try {
-    // 流式回答占位：逐块写入回答内容
     await chatStream(
-      { knowledge_base_id: kbStore.currentKbId, question: q, top_k: 5 },
+      { knowledgeBaseId: kbStore.currentKbId, question: q, topK: 5 },
       (text) => {
         assistantMsg.content += text
         scrollToBottom()
       },
+      (sources) => {
+        assistantMsg.sources = sources
+      },
       abortController.value.signal,
     )
-    assistantMsg.sources = []
   } catch (e: any) {
     if (e?.name !== 'AbortError') {
-      assistantMsg.content = assistantMsg.content || '回答失败，请稍后重试。'
+      assistantMsg.content = assistantMsg.content || `回答失败：${e?.message || '请稍后重试'}`
     }
   } finally {
     answering.value = false
@@ -75,7 +76,7 @@ function clear() {
   messages.value = []
 }
 
-function viewSources(sources: SearchHit[] = []) {
+function viewSources(sources: ChatSource[] = []) {
   debugSources.value = sources
   debugVisible.value = true
 }
@@ -85,51 +86,29 @@ function viewSources(sources: SearchHit[] = []) {
   <div class="page-container chat-page">
     <div class="page-header">
       <h2 class="page-title">知识库对话</h2>
-      <p class="page-desc">基于选定知识库进行 RAG 问答，支持流式回答与来源引用</p>
+      <p class="page-desc">基于检索结果生成回答，支持流式输出与原文来源引用</p>
     </div>
 
     <el-card shadow="never" class="chat-card">
       <template #header>
         <div class="toolbar">
-          <el-select
-            v-model="kbStore.currentKbId"
-            placeholder="请选择知识库"
-            style="width: 240px"
-          >
-            <el-option
-              v-for="kb in kbStore.knowledgeBases"
-              :key="kb.id"
-              :label="kb.name"
-              :value="kb.id"
-            />
+          <el-select v-model="kbStore.currentKbId" placeholder="请选择知识库" style="width: 240px">
+            <el-option v-for="kb in kbStore.knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id" />
           </el-select>
           <el-button :icon="Delete" @click="clear">清空对话</el-button>
         </div>
       </template>
 
       <div ref="scrollRef" class="message-list">
-        <div v-if="!messages.length" class="empty-tip">
-          <el-icon :size="40"><ChatDotRound /></el-icon>
-          <p>请输入问题，开始与知识库对话</p>
-        </div>
-        <div
-          v-for="(msg, index) in messages"
-          :key="index"
-          class="message-row"
-          :class="msg.role"
-        >
-          <div class="bubble">
-            <div class="role-label">{{ msg.role === 'user' ? '我' : 'AI 助手' }}</div>
-            <div class="bubble-content">{{ msg.content || '正在思考...' }}</div>
-            <el-button
-              v-if="msg.role === 'assistant'"
-              link
-              type="primary"
-              size="small"
-              @click="viewSources(msg.sources)"
-            >
-              来源引用
-            </el-button>
+        <el-empty v-if="!messages.length" description="输入问题开始对话" />
+        <div v-for="(msg, index) in messages" :key="index" class="message-row" :class="msg.role">
+          <div class="message-bubble">
+            <div class="message-content">{{ msg.content || (answering ? '正在思考…' : '') }}</div>
+            <div v-if="msg.role === 'assistant' && msg.sources?.length" class="source-bar">
+              <el-button link type="primary" :icon="Document" @click="viewSources(msg.sources)">
+                查看 {{ msg.sources.length }} 条来源
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -139,61 +118,49 @@ function viewSources(sources: SearchHit[] = []) {
           v-model="question"
           type="textarea"
           :rows="3"
-          placeholder="请输入您的问题，例如：公司的 Redis 限流方案是什么？"
+          placeholder="输入问题，Ctrl + Enter 发送"
           :disabled="answering"
-          @keyup.ctrl.enter="send"
+          @keydown.ctrl.enter.prevent="send"
         />
-        <div class="input-actions">
-          <span class="text-muted">Ctrl + Enter 发送</span>
-          <el-button v-if="answering" @click="stop">停止生成</el-button>
-          <el-button type="primary" :icon="Promotion" :loading="answering" @click="send">
-            发送
-          </el-button>
+        <div class="actions">
+          <el-button v-if="answering" type="danger" plain @click="stop">停止生成</el-button>
+          <el-button v-else type="primary" :icon="Promotion" :loading="answering" @click="send">发送</el-button>
         </div>
       </div>
     </el-card>
 
-    <el-dialog v-model="debugVisible" title="检索结果调试" width="700px">
-      <el-empty v-if="!debugSources.length" description="暂无来源（后端接入后将展示引用原文）" />
-      <div v-for="hit in debugSources" :key="hit.chunk_id" class="source-item">
-        <div class="source-title">
-          {{ hit.file_name }} · 第 {{ hit.page || '-' }} 页 · 得分 {{ hit.score?.toFixed?.(3) }}
+    <el-dialog v-model="debugVisible" title="引用来源" width="700px">
+      <div v-for="(source, i) in debugSources" :key="source.chunkId + i" class="source-item">
+        <div class="source-meta">
+          <strong>[{{ i + 1 }}] {{ source.fileName || source.documentId }}</strong>
+          <span v-if="source.page">第 {{ source.page }} 页</span>
+          <span>相关度 {{ source.score.toFixed(4) }}</span>
         </div>
-        <div class="source-content">{{ hit.content }}</div>
+        <div class="source-content">{{ source.content }}</div>
       </div>
+      <el-empty v-if="!debugSources.length" description="本次回答没有来源" />
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .chat-page {
-  height: calc(100vh - 60px);
-  display: flex;
-  flex-direction: column;
+  height: calc(100vh - 120px);
 }
 .chat-card {
-  flex: 1;
+  height: calc(100% - 72px);
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 .toolbar {
   display: flex;
   gap: 12px;
+  align-items: center;
 }
 .message-list {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  background: #fafafa;
-}
-.empty-tip {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--kb-muted);
 }
 .message-row {
   display: flex;
@@ -202,54 +169,48 @@ function viewSources(sources: SearchHit[] = []) {
 .message-row.user {
   justify-content: flex-end;
 }
-.bubble {
-  max-width: 75%;
-  background: #fff;
-  border: 1px solid var(--kb-border);
-  border-radius: 8px;
-  padding: 10px 14px;
+.message-bubble {
+  max-width: 78%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--kb-bg, #f5f7fa);
+  border: 1px solid var(--kb-border, #e4e7ed);
 }
-.message-row.user .bubble {
-  background: #409eff;
-  color: #fff;
-  border-color: #409eff;
+.message-row.user .message-bubble {
+  background: #ecf5ff;
 }
-.role-label {
-  font-size: 12px;
-  color: var(--kb-muted);
-  margin-bottom: 6px;
-}
-.message-row.user .role-label {
-  color: rgba(255, 255, 255, 0.85);
-}
-.bubble-content {
+.message-content {
   white-space: pre-wrap;
-  line-height: 1.6;
-  font-size: 14px;
+  line-height: 1.7;
+}
+.source-bar {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--kb-border, #e4e7ed);
 }
 .input-area {
-  border-top: 1px solid var(--kb-border);
+  border-top: 1px solid var(--kb-border, #e4e7ed);
   padding-top: 12px;
 }
-.input-actions {
+.actions {
   display: flex;
   justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 .source-item {
-  border-bottom: 1px solid var(--kb-border);
-  padding: 12px 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--kb-border, #e4e7ed);
 }
-.source-title {
-  font-weight: 600;
+.source-meta {
+  display: flex;
+  gap: 12px;
   font-size: 13px;
+  color: var(--kb-muted, #909399);
   margin-bottom: 6px;
 }
 .source-content {
-  font-size: 13px;
-  color: var(--kb-muted);
   white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.6;
 }
 </style>

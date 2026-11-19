@@ -32,6 +32,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '文档管理', icon: 'Document' },
       },
       {
+        path: 'search',
+        name: 'Search',
+        component: () => import('@/views/Search.vue'),
+        meta: { title: '知识检索', icon: 'Search' },
+      },
+      {
         path: 'chat',
         name: 'Chat',
         component: () => import('@/views/Chat.vue'),
